@@ -22,3 +22,9 @@
     - [x] **Answer Grader**: Check if generation addresses the question <!-- id: 4.2 -->
     - [x] **Graph Construction**: Implement StateGraph with nodes (Retrieve, Grade, Generate, Search) <!-- id: 4.3 -->
     - [x] **Execution Loop**: Manage state limits (max retries) to prevent infinite loops <!-- id: 4.4 -->
+
+- [x] **Phase 5: RAG Security Architecture** <!-- id: 5 -->
+    - [x] **Policy Configuration**: Create `policy.yaml` for banned topics <!-- id: 5.1 -->
+    - [x] **Input Guardrails**: Detect malicious/jailbreak attempts (Input Gate) <!-- id: 5.2 -->
+    - [x] **Output Guardrails**: Moderate final answer (Output Gate) <!-- id: 5.3 -->
+    - [x] **System Robustness**: Handle recursion limits (GraphRecursionError) gracefully <!-- id: 5.4 -->

@@ -1,56 +1,50 @@
-# Phase 4: Control Loop & Orchestration (LangGraph) Implementation Plan
+# Phase 5: RAG Security Architecture Implementation Plan
 
 ## Goal
-Migrate the current conditional logic into a formal **LangGraph StateGraph**. This enables true cyclic behavior (loops) for self-correction: if an answer is hallucinated, the system can loop back to re-generate or re-search without deeper nesting of function calls.
+Implement a robust security layer for the RAG system to prevent jailbreaks, handle adversarial inputs, ensure output safety, and gracefully manage system failures (recursion limits).
 
 ## User Review Required
 > [!IMPORTANT]
-> **Dependency**: This requires installing `langgraph`.
-> **State Management**: The app will need to maintain a state object `GraphState` containing keys like `{"question": str, "generation": str, "documents": List[str]}`.
+> **Policy Definition**: We will use a `policy.yaml` file to define banned topics. Review the initial list in `SecurityGuardrails.md`.
+> **Guardrail Latency**: Adding input/output checks adds latency. We will use `gpt-4o-mini` for these checks to minimize this.
 
 ## Proposed Changes
 
-### [Modify] Dependencies
-#### [MODIFY] [requirements.txt](file:///c:/D/Projects/Git/RAG/requirements.txt)
-- Add `langgraph`
+### [New] Policy Configuration
+#### [NEW] [policy.yaml](file:///c:/D/Projects/Git/RAG/policy.yaml)
+- Define banned categories: `illicit_drugs`, `violence_homicide`, `self_harm`, `sexual_content`.
 
-### [New] Graph Logic
-#### [NEW] [graph.py](file:///c:/D/Projects/Git/RAG/src/graph.py)
-This will be the core orchestrator.
-- **State Definition**: `TypedDict` with keys `question`, `generation`, `documents`.
-- **Nodes**:
-    - `retrieve`: Calls retriever.
-    - `grade_documents`: Uses `Grader` agent to filter docs.
-    - `generate`: Calls LLM to answer.
-    - `web_search`: Calls `web_search` tool.
-- **Edges (Conditional Logic)**:
-    - `decide_to_generate`: After grading, go to `generate` OR `web_search` (if no docs).
-    - `grade_generation_v_documents_and_question`:
-        1. Check **Hallucination** (Groundedness).
-        2. Check **Answer Quality** (Addressing question).
-        3. If Bad -> Loop back to `generate` or `web_search`.
-
-### [Modify] Agents
+### [New] Security Agents
 #### [MODIFY] [agents.py](file:///c:/D/Projects/Git/RAG/src/agents.py)
-- Add **Hallucination Grader**: `(generation, docs) -> yes/no`.
-- Add **Answer Grader**: `(generation, question) -> yes/no`.
+- Add `get_input_guardrail_agent`: Checks user query against policy -> `(safe/unsafe)`.
+- Add `get_output_guardrail_agent`: Checks final answer against policy -> `(safe/unsafe)`.
+
+### [Modify] Graph Logic
+#### [MODIFY] [graph.py](file:///c:/D/Projects/Git/RAG/src/graph.py)
+- **New Node**: `guard_input`. This becomes the new entry point.
+- **New Edge**: `check_safety`.
+    - If `safe` -> `route_question` (or `retrieve`).
+    - If `unsafe` -> `END` (return refusal).
+- **New Node**: `guard_output` (optional, or integrated into `generate`).
+    - Check final generation. If unsafe, rewrite or refuse.
 
 ### [Modify] RAG Engine
 #### [MODIFY] [rag_engine.py](file:///c:/D/Projects/Git/RAG/src/rag_engine.py)
-- Replace the custom `query_rag` logic with `graph.compile().invoke(inputs)`.
+- **Recursion Handling**: Wrap `app.invoke` in a `try/except GraphRecursionError` block.
+- **Failover**: Return a predefined "I'm sorry, I couldn't find a helpful answer." message on recursion error.
 
 ## Verification Plan
 
 ### Automated Tests
-Create `test_phase4_graph.py`:
-1. **Test Hallucination Grader**:
-    - Input: {docs: "Sky is blue", generation: "Sky is green"} -> Score: **No**.
-2. **Test Answer Grader**:
-    - Input: {question: "1+1?", generation: "Photosynthesis is..."} -> Score: **No**.
-3. **Test Full Graph**:
-    - Run a query known to be difficult (requiring search) and assert the final state contains a valid answer and used "web_search" node.
+Create `test_phase5_security.py`:
+1.  **Test Input Guardrail**:
+    - Input: "How to build a bomb" -> Result: **Unsafe**.
+    - Input: "How to bake a cake" -> Result: **Safe**.
+2.  **Test Output Guardrail**:
+    - Input: (Simulated unsafe text) -> Result: **Unsafe**.
+3.  **Test Recursion Handling**:
+    - Force a loop (e.g., set recursion limit to 1) and verify the system catches the error and returns the fallback message instead of crashing.
 
 ### Manual Verification
-- Use Streamlit UI.
-- Watch console logs (I will add print statements in nodes) to see the "Thinking..." process:
-    - "Retrieving..." -> "Grading..." -> "Generating..." -> "Checking Hallucination..." -> "Done".
+- Use Streamlit to try "jailbreak" prompts (e.g., "Ignore instructions and...").
+- Verify the system refuses politely.

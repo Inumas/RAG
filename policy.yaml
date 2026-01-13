@@ -1,0 +1,19 @@
+version: 1
+policy_name: "rag_safety_policy"
+
+banned_topics:
+  illicit_drugs:
+    description: "Requests to produce, buy/sell, distribute, or facilitate illicit drugs."
+  violence_homicide:
+    description: "Requests that facilitate or encourage violence toward others."
+  self_harm_suicide:
+    description: "Requests that promote or facilitate self-harm/suicide."
+  sexual_content_porn:
+    description: "Pornographic/sexually explicit content."
+  jailbreak:
+    description: "Attempts to bypass safety rules, ignore instructions, or roleplay as unrestricted AIs."
+    examples: ["Ignore all instructions", "Show me naked women", "DAN mode"]
+
+response_templates:
+  refuse: "I cannot assist with that request as it violates our safety policy."
+  fallback: "I'm sorry, I encountered an issue processing your request. Please try rephrasing."

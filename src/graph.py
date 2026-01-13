@@ -1,7 +1,14 @@
 from typing import List, TypedDict
 from langchain_core.documents import Document
 from langgraph.graph import END, StateGraph
-from agents import get_router_agent, get_grading_agent, get_rewriter_agent, get_hallucination_grader, get_answer_grader
+from agents import (
+    get_router_agent, 
+    get_grading_agent, 
+    get_rewriter_agent, 
+    get_hallucination_grader, 
+    get_answer_grader,
+    get_input_guardrail_agent
+)
 from web_search import web_search
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -16,6 +23,29 @@ class GraphState(TypedDict):
     api_key: str
     retriever: any  # The retriever object
     web_search: bool
+    safety_status: str # "safe" or "unsafe"
+
+# --- Security Nodes ---
+
+def guard_input(state):
+    """
+    Check if the input is safe.
+    """
+    print("---GUARD INPUT---")
+    question = state["question"]
+    api_key = state["api_key"]
+    
+    guard = get_input_guardrail_agent(api_key)
+    result = guard.invoke({"question": question})
+    
+    if result.safe == "unsafe":
+        print("---UNSAFE INPUT DETECTED---")
+        return {"safety_status": "unsafe", "generation": "I cannot assist with that request as it violates our safety policy."}
+    else:
+        print("---INPUT SAFE---")
+        return {"safety_status": "safe"}
+
+# --- Core Nodes ---
 
 def retrieve(state):
     """
@@ -110,7 +140,17 @@ def web_search_node(state):
     
     return {"documents": docs, "question": question}
 
-# --- Arguments for Conditional Edges ---
+# --- Conditional Edges ---
+
+def check_safety(state):
+    """
+    Check safety status to decide route.
+    """
+    status = state["safety_status"]
+    if status == "unsafe":
+        return "unsafe"
+    else:
+        return "safe"
 
 def decide_to_generate(state):
     """
@@ -162,8 +202,6 @@ def route_question(state):
     Route question to web search or RAG.
     """
     print("---ROUTE QUESTION---")
-    # For now, we assume everything goes to RAG first unless logic changes.
-    # But we can use the router agent here.
     question = state["question"]
     api_key = state["api_key"]
     router = get_router_agent(api_key)
@@ -181,21 +219,33 @@ def build_graph():
     workflow = StateGraph(GraphState)
 
     # Define the nodes
+    workflow.add_node("guard_input", guard_input)
     workflow.add_node("web_search", web_search_node)
     workflow.add_node("retrieve", retrieve)
     workflow.add_node("grade_documents", grade_documents)
     workflow.add_node("generate", generate)
     workflow.add_node("transform_query", transform_query)
 
-    # Build graph
-    workflow.set_conditional_entry_point(
-        route_question,
+    # Entry Point: Always Guard Input
+    workflow.set_entry_point("guard_input")
+    
+    # Conditional Edge from Guard Input
+    # If safe, check router. If unsafe, END.
+    def guard_router(state):
+        if state.get("safety_status") == "unsafe":
+            return "unsafe"
+        return route_question(state)
+
+    workflow.add_conditional_edges(
+        "guard_input",
+        guard_router,
         {
+            "unsafe": END,
             "web_search": "web_search",
             "vectorstore": "retrieve",
-        },
+        }
     )
-    
+
     workflow.add_edge("web_search", "generate")
     workflow.add_edge("retrieve", "grade_documents")
     
@@ -214,16 +264,10 @@ def build_graph():
         "generate",
         grade_generation_v_documents_and_question,
         {
-            "useful": END,               # End
-            "not useful": "transform_query", # Loop
-            "not supported": "generate",     # Loop (re-generate) - beware infinite loop here, ideally re-generate with new prompt? 
-                                             # For simplicity, if not supported, we might try web search?
-                                             # Let's map "not supported" to "transform_query" to force external search
-                                             # to avoid stuck in hallucination loop with same docs.
+            "useful": END,               
+            "not useful": "transform_query", 
+            "not supported": "generate",     # Potentially map to transform_query to avoid infinite loop
         },
     )
-    
-    # Update edge mapping
-    # Note: "not supported" -> "transform_query" implies we abandon current docs and go to web.
     
     return workflow.compile()

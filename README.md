@@ -47,22 +47,33 @@ This project was built using a modern AI-native stack optimized for speed of dev
 - **Trade-off:** Complexity and slightly higher latency.
 - **Benefit:** 
     - **Self-Correction**: The system can "change its mind" and rewrite queries if initial results are poor.
-    - **Hallucination Protection**: Explicit checks ensure the answer is grounded in facts.
+    *   **Hallucination Protection**: Explicit checks ensure the answer is grounded in facts.
     - **Cyclic Flow**: Unlike linear chains, the graph can loop back (`Generate` -> `Bad Grade` -> `Rewrite` -> `Search` -> `Generate`).
+
+### 5. **Security & Robustness**
+- **Decision:** Implemented **Input/Output Guardrails** and **Recursion Handling**.
+- **Trade-off:** Small latency increase for safety checks.
+- **Benefit:** 
+    - Prevents jailbreaks (e.g., "Ignore instructions").
+    - Filters unsafe content (Drugs, Violence, Porn).
+    - Fails gracefully with a polite message if the system loops too many times.
 
 ## Architecture Flow (LangGraph)
 
 The system is modeled as a State Graph:
 
-1.  **Route**: User Query -> Router Agent -> `VectorStore` OR `WebSearch`.
-2.  **Retrieve (VectorStore)**: Fetch docs -> **Grade Documents Agent**.
+1.  **Safety Check**: User Query -> **Input Guardrail** (Check `policy.yaml`).
+    *   If *Unsafe*: **Refuse** immediately.
+    *   If *Safe*: Proceed to Routing.
+2.  **Route**: User Query -> Router Agent -> `VectorStore` OR `WebSearch`.
+3.  **Retrieve (VectorStore)**: Fetch docs -> **Grade Documents Agent**.
     *   If *Relevant*: Proceed to Generate.
     *   If *Not Relevant*: **Rewrite Query** -> Loop to **Web Search**.
-3.  **Generate**: Produce Answer.
-4.  **Reflection (Loop)**: 
+4.  **Generate**: Produce Answer.
+5.  **Reflection (Loop)**: 
     *   **Hallucination Grader**: Is answer grounded? -> If No: **Rewrite** -> Loop.
     *   **Answer Grader**: Does it answer the question? -> If No: **Rewrite** -> Loop.
-5.  **Final Output**: Verified answer displayed in UI.
+6.  **Final Output**: Verified answer displayed in UI.
 
 ## Setup (Windows)
 
