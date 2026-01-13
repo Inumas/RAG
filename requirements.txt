@@ -12,3 +12,5 @@ python-dotenv
 tiktoken
 rank_bm25
 sentence-transformers
+duckduckgo-search
+langchain_community

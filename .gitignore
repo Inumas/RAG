@@ -5,7 +5,3 @@ __pycache__/
 .DS_Store
 
 # Documentation and Task files
-task.md
-Task_progress.md
-implementation_plan.md
-Gemini.md
