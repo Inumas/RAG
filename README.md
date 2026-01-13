@@ -17,8 +17,8 @@ This project was built using a modern AI-native stack optimized for speed of dev
 | Component | Technology | Reason |
 |-----------|------------|--------|
 | **Frontend** | [Streamlit](https://streamlit.io/) | Chosen for rapid prototyping of data/AI applications with built-in chat UI (`st.chat_message`) and state management, minimizing frontend boilerplate. |
-| **Orchestration** | [LangChain](https://www.langchain.com/) | Provides the framework for chaining LLM calls, managing retrievers, and handling prompt templates (`ChatPromptTemplate`, `RunnablePassthrough`). |
-| **Agents** | Custom (`src/agents.py`) | Implements Router, Grader, and Rewriter agents using structured outputs (`pydantic`) for robust control flow. |
+| **Orchestration** | [LangChain](https://www.langchain.com/) & [LangGraph](https://langchain-ai.github.io/langgraph/) | **LangChain** handles chains/prompts. **LangGraph** manages the state machine, cyclic control flow, and self-correction loops. |
+| **Agents** | Custom (`src/agents.py`) | Router, Grader (Docs), Grader (Hallucination), Grader (Answer), Rewriter. |
 | **Vector DB** | [ChromaDB](https://www.trychroma.com/) | A lightweight, open-source vector database runs locally (`PersistentClient`), making it easy to set up without external cloud dependencies for this demo. |
 | **LLM** | [OpenAI GPT-4o-mini](https://openai.com/) | Selected for its balance of high reasoning capability, speed, and cost-effectiveness for RAG tasks (`gpt-4o-mini` is used). |
 | **Embeddings** | OpenAI `text-embedding-3-small` | State-of-the-art embedding model for semantic search, offering better performance than older Ada models at a lower cost. |
@@ -43,25 +43,26 @@ This project was built using a modern AI-native stack optimized for speed of dev
 - **Benefit:** `gpt-4o-mini` provides superior reasoning and context adherence compared to most local models manageable on standard consumer hardware, ensuring high-quality answers.
 
 ### 4. **Agentic vs. Linear RAG**
-- **Decision:** Implemented an Agentic Workflow (Router -> Grader -> Correction).
-- **Trade-off:** slightly higher latency due to multiple LLM calls per query.
-- **Benefit:** drastically reduced "IDK" responses and "Hallucinations". The system knows when to look elsewhere (Web) and checks its own work.
+- **Decision:** Implemented an Agentic Workflow with **LangGraph**.
+- **Trade-off:** Complexity and slightly higher latency.
+- **Benefit:** 
+    - **Self-Correction**: The system can "change its mind" and rewrite queries if initial results are poor.
+    - **Hallucination Protection**: Explicit checks ensure the answer is grounded in facts.
+    - **Cyclic Flow**: Unlike linear chains, the graph can loop back (`Generate` -> `Bad Grade` -> `Rewrite` -> `Search` -> `Generate`).
 
-## Architecture Flow (Agentic)
+## Architecture Flow (LangGraph)
 
-1.  **Ingestion Phase:**
-    *   Scrape articles -> Text Splitter (Recursive 1000/200) -> Generate Embeddings -> Store in ChromaDB.
-2.  **Query Routing Phase:**
-    *   **Router Agent**: Analyzes User Question -> Decides: `Vector Store` OR `Web Search`.
-3.  **Retrieval Phase:**
-    *   If **Vector Store**: Retrieve -> **Grader Agent** checks relevance.
-        *   If *Relevant*: Proceed to Generation.
-        *   If *Not Relevant*: **Rewriter Agent** reformulates query -> Fallback to **Web Search**.
-    *   If **Web Search**: Query DuckDuckGo -> Get Results.
-4.  **Generation Phase:**
-    *   Context (from Vector/Web) + Question -> LLM -> Answer.
-5.  **Display Phase:**
-    *   Show Answer + Render Source Images and Links in UI.
+The system is modeled as a State Graph:
+
+1.  **Route**: User Query -> Router Agent -> `VectorStore` OR `WebSearch`.
+2.  **Retrieve (VectorStore)**: Fetch docs -> **Grade Documents Agent**.
+    *   If *Relevant*: Proceed to Generate.
+    *   If *Not Relevant*: **Rewrite Query** -> Loop to **Web Search**.
+3.  **Generate**: Produce Answer.
+4.  **Reflection (Loop)**: 
+    *   **Hallucination Grader**: Is answer grounded? -> If No: **Rewrite** -> Loop.
+    *   **Answer Grader**: Does it answer the question? -> If No: **Rewrite** -> Loop.
+5.  **Final Output**: Verified answer displayed in UI.
 
 ## Setup (Windows)
 

@@ -23,4 +23,26 @@ This document tracks the git commands executed during the development process, a
 **Feature**: Branch Creation
 
 5.  `git checkout -b phase-3-agentic-workflow-core`
-    *   **Reason**: To create a new branch named `phase-3-agentic-workflow-core` and switch to it immediately. This isolates the new development work for Phase 3 from the stable `main` branch.
+6.  `git add .`
+    *   **Reason**: To stage all changes made during Phase 3 implementation (new files, modified readme, etc.).
+
+7.  `git commit -m "Feature: Phase 3 - Agentic Workflow Core (Router, Grader, Web Search)"`
+    *   **Reason**: To save the Phase 3 changes to the `phase-3-agentic-workflow-core` branch.
+
+8.  `git push --set-upstream origin phase-3-agentic-workflow-core`
+    *   **Reason**: To backup the feature branch to GitHub.
+
+9.  `git checkout main`
+    *   **Reason**: To switch back to the main branch to prepare for merging. (Note: Had to remove `index.lock` and kill processes blocking the checkout).
+
+10. `git merge phase-3-agentic-workflow-core`
+    *   **Reason**: To integrate the tested Phase 3 features into the stable `main` codebase.
+
+11. `git push`
+
+## Phase 4: Control Loop & Orchestration
+**Date**: 2026-01-13
+**Feature**: Graph Control Flow
+
+12. `git checkout -b phase-4-control-loop`
+    *   **Reason**: To isolate Phase 4 changes (LangGraph integration) from the main branch.
