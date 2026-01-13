@@ -1,0 +1,14 @@
+streamlit
+requests
+beautifulsoup4
+chromadb
+openai
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-chroma
+python-dotenv
+tiktoken
+rank_bm25
+sentence-transformers
