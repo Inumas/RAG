@@ -46,3 +46,27 @@ This document tracks the git commands executed during the development process, a
 
 12. `git checkout -b phase-4-control-loop`
     *   **Reason**: To isolate Phase 4 changes (LangGraph integration) from the main branch.
+
+13. `git add .`
+    *   **Reason**: To stage the new Graph implementation, agents, and test scripts.
+
+14. `git commit -m "Feature: Phase 4 - Control Loop & Orchestration (LangGraph)"`
+    *   **Reason**: To save the Phase 4 changes.
+
+15. `git push --set-upstream origin phase-4-control-loop`
+    *   **Reason**: To backup the Phase 4 branch to GitHub.
+
+16. `git checkout main`
+    *   **Reason**: Switching to main for merge. *Note: Terminated running python processes (Streamlit) to release file locks on `chroma.sqlite3`.*
+
+17. `git merge phase-4-control-loop`
+    *   **Reason**: To integrate the Agentic Graph Control Loop into the main branch.
+
+18. `git push`
+
+## Phase 5: RAG Security Architecture
+**Date**: 2026-01-13
+**Feature**: Security Guards & Robustness
+
+19. `git checkout -b phase-5-security`
+    *   **Reason**: To isolate security implementations (Guardrails, Policy) from the main branch.
