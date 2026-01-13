@@ -1,56 +1,56 @@
-# Phase 3: Agentic Workflow Core Implementation Plan
+# Phase 4: Control Loop & Orchestration (LangGraph) Implementation Plan
 
 ## Goal
-Transform the linear RAG pipeline into an **Agentic Workflow** that can reason about *where* to find information (Internal Knowledge Base vs. Web) and self-correct by grading retrieved documents.
+Migrate the current conditional logic into a formal **LangGraph StateGraph**. This enables true cyclic behavior (loops) for self-correction: if an answer is hallucinated, the system can loop back to re-generate or re-search without deeper nesting of function calls.
 
 ## User Review Required
 > [!IMPORTANT]
-> **Web Search Tool**: I will use `DuckDuckGoSearchRun` (LangChain Community) as it requires no API key for basic usage. If you prefer Tavily or Google Search, we will need to add those API keys to `.env`.
-
-> [!WARNING]
-> **Refactoring**: `rag_engine.py` currently holds the linear logic. I will refactor this into a modular `GraphState` (using LangGraph logic, even if implemented simply first) or just modular functions `src/agents/*.py`.
+> **Dependency**: This requires installing `langgraph`.
+> **State Management**: The app will need to maintain a state object `GraphState` containing keys like `{"question": str, "generation": str, "documents": List[str]}`.
 
 ## Proposed Changes
 
-### [New] Web Search Tool
-#### [NEW] [web_search.py](file:///c:/D/Projects/Git/RAG/src/web_search.py)
-- Implement `DuckDuckGoSearchRun` wrapper.
-- Function `web_search(query: str) -> List[str]`
+### [Modify] Dependencies
+#### [MODIFY] [requirements.txt](file:///c:/D/Projects/Git/RAG/requirements.txt)
+- Add `langgraph`
 
-### [New] Agents Logic
-#### [NEW] [agents.py](file:///c:/D/Projects/Git/RAG/src/agents.py)
-This file will contain the specific logic for each agent node.
-- **`Router`**: Class/Function using specific prompts to decide: `["vector_store", "web_search"]`.
-- **`Grader`**: LLM chain that takes (question, document) and outputs JSON `{score: yes/no}`.
-- **`Rewriter`**: LLM chain that takes (question) and outputs a "better" query.
+### [New] Graph Logic
+#### [NEW] [graph.py](file:///c:/D/Projects/Git/RAG/src/graph.py)
+This will be the core orchestrator.
+- **State Definition**: `TypedDict` with keys `question`, `generation`, `documents`.
+- **Nodes**:
+    - `retrieve`: Calls retriever.
+    - `grade_documents`: Uses `Grader` agent to filter docs.
+    - `generate`: Calls LLM to answer.
+    - `web_search`: Calls `web_search` tool.
+- **Edges (Conditional Logic)**:
+    - `decide_to_generate`: After grading, go to `generate` OR `web_search` (if no docs).
+    - `grade_generation_v_documents_and_question`:
+        1. Check **Hallucination** (Groundedness).
+        2. Check **Answer Quality** (Addressing question).
+        3. If Bad -> Loop back to `generate` or `web_search`.
+
+### [Modify] Agents
+#### [MODIFY] [agents.py](file:///c:/D/Projects/Git/RAG/src/agents.py)
+- Add **Hallucination Grader**: `(generation, docs) -> yes/no`.
+- Add **Answer Grader**: `(generation, question) -> yes/no`.
 
 ### [Modify] RAG Engine
 #### [MODIFY] [rag_engine.py](file:///c:/D/Projects/Git/RAG/src/rag_engine.py)
-- Update `query_rag` to use the new "Conditional" flow:
-    1. **Route** Query.
-    2. If **Vector Store**: Retrieve -> **Grade** -> (If bad) **Rewrite** -> Web Search.
-    3. If **Web Search**: Search -> **Grade**.
-    4. **Generate** Final Answer.
-
-### [Modify] Dependencies
-#### [MODIFY] [requirements.txt](file:///c:/D/Projects/Git/RAG/requirements.txt)
-- Add `duckduckgo-search`
-- Add `langgraph` (Optional but good for future Control Loop) - *For now I will stick to conditional logic to keep it simple unless requested.*
+- Replace the custom `query_rag` logic with `graph.compile().invoke(inputs)`.
 
 ## Verification Plan
 
 ### Automated Tests
-I will create a specific test script `test_agent_flow.py` to verify each component individually.
-
-1. **Test Router**:
-   - `python test_agent_flow.py --component router --query "What is the latest context on LLMs?"` -> Should hit Web/Vector depending on phrasing.
-   - `python test_agent_flow.py --component router --query "Summarize the uploaded newsletter"` -> Should hit Vector Store.
-
-2. **Test Grader**:
-   - Manually pass a "bad" document and a query to see if it says "no".
-
-3. **Test Web Search**:
-   - Verify network connectivity and result parsing.
+Create `test_phase4_graph.py`:
+1. **Test Hallucination Grader**:
+    - Input: {docs: "Sky is blue", generation: "Sky is green"} -> Score: **No**.
+2. **Test Answer Grader**:
+    - Input: {question: "1+1?", generation: "Photosynthesis is..."} -> Score: **No**.
+3. **Test Full Graph**:
+    - Run a query known to be difficult (requiring search) and assert the final state contains a valid answer and used "web_search" node.
 
 ### Manual Verification
-- Run `streamlit run app.py` and ask questions that *require* external knowledge (e.g., "What is the weather today?" or "Who won the super bowl 2024?") to see if it routes to the web.
+- Use Streamlit UI.
+- Watch console logs (I will add print statements in nodes) to see the "Thinking..." process:
+    - "Retrieving..." -> "Grading..." -> "Generating..." -> "Checking Hallucination..." -> "Done".

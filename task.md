@@ -17,7 +17,8 @@
     - [x] **Document Grader**: Implement relevance grading for retrieved chunks <!-- id: 3.4 -->
     - [x] **Distillation Agent**: Implement evidence compression/synthesis from top results <!-- id: 3.3 -->
 
-- [ ] **Phase 4: Control Loop & Orchestration** <!-- id: 4 -->
-    - [ ] **Policy Agent**: Implement reflection loop (Unknown answer -> Re-retrieve or Web Search) <!-- id: 4.1 -->
-    - [ ] Integrate all agents into a cohesive graph/chain <!-- id: 4.2 -->
-    - [ ] Final answer generation with strict citations <!-- id: 4.3 -->
+- [x] **Phase 4: Control Loop & Orchestration (LangGraph)** <!-- id: 4 -->
+    - [x] **Hallucination Grader**: Check if generation is grounded in docs <!-- id: 4.1 -->
+    - [x] **Answer Grader**: Check if generation addresses the question <!-- id: 4.2 -->
+    - [x] **Graph Construction**: Implement StateGraph with nodes (Retrieve, Grade, Generate, Search) <!-- id: 4.3 -->
+    - [x] **Execution Loop**: Manage state limits (max retries) to prevent infinite loops <!-- id: 4.4 -->
