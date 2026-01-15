@@ -12,18 +12,26 @@ from agents import (
 from web_search import web_search
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+import sys
+
+# Maximum number of retries before giving up
+MAX_RETRIES = 3
+MAX_GENERATION_CALLS = 5  # Hard limit on generate calls
 
 class GraphState(TypedDict):
     """
     Represents the state of our graph.
     """
     question: str
+    original_question: str  # Keep original for reference
     generation: str
     documents: List[str]
     api_key: str
     retriever: any  # The retriever object
     web_search: bool
     safety_status: str # "safe" or "unsafe"
+    retry_count: int  # Track number of query transform retries
+    generation_count: int  # Track number of generate calls (hard limit)
 
 # --- Security Nodes ---
 
@@ -59,32 +67,65 @@ def retrieve(state):
 
 def generate(state):
     """
-    Generate answer
+    Generate answer. Tracks call count to prevent infinite loops.
     """
-    print("---GENERATE---")
+    generation_count = state.get("generation_count", 0) + 1
+    print(f"---GENERATE (call {generation_count}/{MAX_GENERATION_CALLS})---", flush=True)
+    
+    # HARD LIMIT: If we've called generate too many times, return a fallback
+    if generation_count > MAX_GENERATION_CALLS:
+        print("---HARD LIMIT REACHED: Returning fallback answer---", flush=True)
+        return {
+            "generation": "I apologize, but I was unable to find a complete answer after multiple attempts. "
+                         "Please try rephrasing your question or ensure data has been ingested into the system.",
+            "generation_count": generation_count
+        }
+    
     question = state["question"]
+    original_question = state.get("original_question", question)
     documents = state["documents"]
     api_key = state["api_key"]
     
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
-    template = """You are a helpful assistant for "The Batch" newsletter.
-    Answer the question based ONLY on the following context. 
-    If the context contains web search results, use them to answer the question.
-    
-    Context:
-    {context}
-    
-    Question: {question}
-    
-    Answer:"""
-    prompt = ChatPromptTemplate.from_template(template)
-    chain = prompt | llm
     
     # Concatenate docs
     context_text = "\n\n".join([d.page_content if hasattr(d, 'page_content') else str(d) for d in documents])
     
-    generation = chain.invoke({"context": context_text, "question": question})
-    return {"documents": documents, "question": question, "generation": generation.content}
+    # Handle empty context gracefully
+    if not context_text.strip() or "No web search results found" in context_text:
+        template = """You are a helpful assistant for "The Batch" newsletter by DeepLearning.AI.
+        
+        The user asked: {question}
+        
+        Unfortunately, I couldn't find specific information in the database or web search.
+        Please provide a helpful response that:
+        1. Acknowledges you couldn't find the specific article
+        2. Suggests the user try ingesting data first or rephrasing their question
+        3. Briefly mentions what "The Batch" newsletter typically covers (AI news, ML research, tech updates)
+        
+        Answer:"""
+    else:
+        template = """You are a helpful assistant for "The Batch" newsletter by DeepLearning.AI.
+        Answer the question based on the following context. 
+        If the context contains web search results, synthesize them into a coherent answer.
+        
+        Context:
+        {context}
+        
+        Original Question: {original_question}
+        Current Question: {question}
+        
+        Answer:"""
+    
+    prompt = ChatPromptTemplate.from_template(template)
+    chain = prompt | llm
+    
+    generation = chain.invoke({
+        "context": context_text, 
+        "question": question,
+        "original_question": original_question
+    })
+    return {"documents": documents, "question": question, "generation": generation.content, "generation_count": generation_count}
 
 def grade_documents(state):
     """
@@ -118,15 +159,23 @@ def grade_documents(state):
 def transform_query(state):
     """
     Transform the query to produce a better question.
+    Increments retry counter to prevent infinite loops.
     """
-    print("---TRANSFORM QUERY---")
+    retry_count = state.get("retry_count", 0) + 1
+    print(f"---TRANSFORM QUERY (retry {retry_count}/{MAX_RETRIES})---", flush=True)
+    
+    # If we've exceeded retries, don't bother rewriting - just pass through
+    if retry_count > MAX_RETRIES:
+        print("---MAX RETRIES EXCEEDED - SKIPPING REWRITE---", flush=True)
+        return {"retry_count": retry_count}
+    
     question = state["question"]
     documents = state["documents"]
     api_key = state["api_key"]
     
     rewriter = get_rewriter_agent(api_key)
     better_question = rewriter.invoke({"question": question})
-    return {"documents": documents, "question": better_question.content}
+    return {"documents": documents, "question": better_question.content, "retry_count": retry_count}
 
 def web_search_node(state):
     """
@@ -169,32 +218,40 @@ def decide_to_generate(state):
 def grade_generation_v_documents_and_question(state):
     """
     Determines whether the generation is grounded in the document and answers question.
+    Includes multiple limit checks to prevent infinite loops.
     """
-    print("---CHECK HALLUCINATIONS---")
+    print("---CHECK HALLUCINATIONS---", flush=True)
     question = state["question"]
     documents = state["documents"]
     generation = state["generation"]
     api_key = state["api_key"]
+    retry_count = state.get("retry_count", 0)
+    generation_count = state.get("generation_count", 0)
+    
+    # Check BOTH limits - if either exceeded, accept whatever we have
+    if retry_count >= MAX_RETRIES or generation_count >= MAX_GENERATION_CALLS:
+        print(f"---LIMIT REACHED (retries={retry_count}, generations={generation_count}) - ACCEPTING ANSWER---", flush=True)
+        return "useful"  # Accept the answer to break the loop
     
     hallucination_grader = get_hallucination_grader(api_key)
     score = hallucination_grader.invoke({"documents": documents, "generation": generation})
     grade = score.binary_score
     
     if grade == "yes":
-        print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---")
+        print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---", flush=True)
         # Check answer to question
-        print("---CHECK ANSWER TO QUESTION---")
+        print("---CHECK ANSWER TO QUESTION---", flush=True)
         answer_grader = get_answer_grader(api_key)
         score = answer_grader.invoke({"question": question, "generation": generation})
         grade = score.binary_score
         if grade == "yes":
-            print("---DECISION: GENERATION ADDRESSES QUESTION---")
+            print("---DECISION: GENERATION ADDRESSES QUESTION---", flush=True)
             return "useful"
         else:
-            print("---DECISION: GENERATION DOES NOT ADDRESS QUESTION---")
+            print("---DECISION: GENERATION DOES NOT ADDRESS QUESTION---", flush=True)
             return "not useful"
     else:
-        print("---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---")
+        print("---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---", flush=True)
         return "not supported"
 
 def route_question(state):
@@ -266,7 +323,7 @@ def build_graph():
         {
             "useful": END,               
             "not useful": "transform_query", 
-            "not supported": "generate",     # Potentially map to transform_query to avoid infinite loop
+            "not supported": "transform_query",  # FIXED: Go through transform_query to increment retry counter
         },
     )
     

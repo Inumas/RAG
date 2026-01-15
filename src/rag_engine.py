@@ -13,10 +13,13 @@ def query_rag(question, api_key, retriever):
     
     inputs = {
         "question": question,
+        "original_question": question,  # Keep original for reference
         "api_key": api_key,
         "retriever": retriever,
         "web_search": False,
-        "safety_status": "unknown" 
+        "safety_status": "unknown",
+        "retry_count": 0,  # Initialize retry counter
+        "generation_count": 0  # Initialize generation call counter
     }
     
     try:
