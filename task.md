@@ -40,3 +40,31 @@
     - [x] **Web Search Fallback**: Multi-strategy search (site-restrict → domain context → raw) <!-- id: 7.2 -->
     - [x] **Answer Grader Fix**: Made grader more lenient to accept partial answers <!-- id: 7.3 -->
     - [x] **Generate Fallback**: Handle empty context gracefully with helpful message <!-- id: 7.4 -->
+
+- [x] **Phase 8: Comprehensive Logging System** <!-- id: 8 -->
+    - [x] **RAGLogger Class**: Structured JSON logging with session tracking <!-- id: 8.1 -->
+    - [x] **Event Types**: 20+ event types covering entire pipeline <!-- id: 8.2 -->
+    - [x] **Graph Integration**: All nodes log actions, durations, and decisions <!-- id: 8.3 -->
+    - [x] **Query History**: Track all query transformations <!-- id: 8.4 -->
+    - [x] **Log Viewer**: CLI tool to analyze and display logs <!-- id: 8.5 -->
+
+- [x] **Phase 9: Metadata-Aware Retrieval** <!-- id: 9 -->
+    - [x] **Temporal Query Detection**: Detect recency queries (recent, latest, last week, etc.) <!-- id: 9.1 -->
+    - [x] **Metadata Filtering**: Retrieve from latest N issues by issue_number <!-- id: 9.2 -->
+    - [x] **Hybrid Approach**: Wide pool from recent issues + semantic reranking <!-- id: 9.3 -->
+    - [x] **Publish Date Extraction**: Add publish_date metadata during ingestion <!-- id: 9.4 -->
+    - [x] **Verification**: Test "What's the most recent article?" returns Issue 334 <!-- id: 9.5 -->
+
+- [x] **Phase 10: Comprehensive Site Ingestion** <!-- id: 10 -->
+    - [x] **Sitemap Discovery**: Get all ~2,427 URLs from sitemap <!-- id: 10.1 -->
+    - [x] **Content Classification**: Detect issue/article/data_points/letter types <!-- id: 10.2 -->
+    - [x] **Incremental Ingestion**: Skip URLs already in database <!-- id: 10.3 -->
+    - [x] **UI Enhancement**: Add ingestion mode selector in app.py <!-- id: 10.4 -->
+    - [x] **Initial Load**: Ingested 1000+ articles (1,335 URLs in DB) <!-- id: 10.5 -->
+    - [x] **Verification**: Confirmed AGI article + Issue 335 in DB <!-- id: 10.6 -->
+
+- [x] **Phase 11: Web Search Restriction** <!-- id: 11 -->
+    - [x] **Route Priority**: Always use vectorstore if DB has data <!-- id: 11.1 -->
+    - [x] **Transform Loop**: transform_query → retrieve (not web_search) <!-- id: 11.2 -->
+    - [x] **Fallback Safety**: Generate with original docs if max retries reached <!-- id: 11.3 -->
+    - [x] **Verification**: Confirmed via log - no web_search, reason: "database_has_data" <!-- id: 11.4 -->

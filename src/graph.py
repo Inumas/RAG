@@ -12,11 +12,16 @@ from agents import (
 from web_search import web_search
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from logger import get_logger, EventType
 import sys
+import time
 
 # Maximum number of retries before giving up
 MAX_RETRIES = 3
 MAX_GENERATION_CALLS = 5  # Hard limit on generate calls
+
+# Get the global logger
+logger = get_logger()
 
 class GraphState(TypedDict):
     """
@@ -32,6 +37,7 @@ class GraphState(TypedDict):
     safety_status: str # "safe" or "unsafe"
     retry_count: int  # Track number of query transform retries
     generation_count: int  # Track number of generate calls (hard limit)
+    temporal_retrieval: bool  # Flag for temporal/recency queries - skip grading
 
 # --- Security Nodes ---
 
@@ -39,18 +45,31 @@ def guard_input(state):
     """
     Check if the input is safe.
     """
-    print("---GUARD INPUT---")
+    start_time = time.time()
+    print("---GUARD INPUT---", flush=True)
     question = state["question"]
     api_key = state["api_key"]
     
     guard = get_input_guardrail_agent(api_key)
     result = guard.invoke({"question": question})
     
+    duration_ms = (time.time() - start_time) * 1000
+    
     if result.safe == "unsafe":
-        print("---UNSAFE INPUT DETECTED---")
+        print("---UNSAFE INPUT DETECTED---", flush=True)
+        logger.log_event(EventType.SAFETY_CHECK, {
+            "result": "unsafe",
+            "question": question,
+            "duration_ms": duration_ms
+        }, duration_ms=duration_ms)
         return {"safety_status": "unsafe", "generation": "I cannot assist with that request as it violates our safety policy."}
     else:
-        print("---INPUT SAFE---")
+        print("---INPUT SAFE---", flush=True)
+        logger.log_event(EventType.SAFETY_CHECK, {
+            "result": "safe",
+            "question": question,
+            "duration_ms": duration_ms
+        }, duration_ms=duration_ms)
         return {"safety_status": "safe"}
 
 # --- Core Nodes ---
@@ -59,25 +78,57 @@ def retrieve(state):
     """
     Retrieve documents
     """
-    print("---RETRIEVE---")
+    start_time = time.time()
+    print("---RETRIEVE---", flush=True)
     question = state["question"]
     retriever = state["retriever"]
+    
+    # Check if this is a temporal query (for skipping grading)
+    is_temporal = retriever._is_temporal_query(question)
+    if is_temporal:
+        print("---TEMPORAL QUERY DETECTED - WILL SKIP GRADING---", flush=True)
+    
     documents = retriever.retrieve(question)
-    return {"documents": documents, "question": question}
+    
+    duration_ms = (time.time() - start_time) * 1000
+    
+    # Log retrieval results
+    doc_summaries = []
+    for i, doc in enumerate(documents):
+        doc_summaries.append({
+            "index": i,
+            "content_preview": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+            "source": doc.metadata.get("source", "unknown"),
+            "title": doc.metadata.get("title", "unknown")
+        })
+    
+    logger.log_event(EventType.RETRIEVAL_END, {
+        "query": question,
+        "document_count": len(documents),
+        "documents": doc_summaries,
+        "duration_ms": duration_ms,
+        "temporal_retrieval": is_temporal
+    }, duration_ms=duration_ms)
+    
+    return {"documents": documents, "question": question, "temporal_retrieval": is_temporal}
 
 def generate(state):
     """
     Generate answer. Tracks call count to prevent infinite loops.
     """
+    start_time = time.time()
     generation_count = state.get("generation_count", 0) + 1
     print(f"---GENERATE (call {generation_count}/{MAX_GENERATION_CALLS})---", flush=True)
     
     # HARD LIMIT: If we've called generate too many times, return a fallback
     if generation_count > MAX_GENERATION_CALLS:
         print("---HARD LIMIT REACHED: Returning fallback answer---", flush=True)
+        logger.log_limit_reached("generation_count", generation_count, MAX_GENERATION_CALLS)
+        fallback_answer = ("I apologize, but I was unable to find a complete answer after multiple attempts. "
+                          "Please try rephrasing your question or ensure data has been ingested into the system.")
+        logger.log_generation(0, len(fallback_answer), generation_count, 0)
         return {
-            "generation": "I apologize, but I was unable to find a complete answer after multiple attempts. "
-                         "Please try rephrasing your question or ensure data has been ingested into the system.",
+            "generation": fallback_answer,
             "generation_count": generation_count
         }
     
@@ -125,35 +176,77 @@ def generate(state):
         "question": question,
         "original_question": original_question
     })
+    
+    duration_ms = (time.time() - start_time) * 1000
+    logger.log_generation(len(context_text), len(generation.content), generation_count, duration_ms)
+    
     return {"documents": documents, "question": question, "generation": generation.content, "generation_count": generation_count}
 
 def grade_documents(state):
     """
     Determines whether the retrieved documents are relevant to the question.
+    For temporal/recency queries, skip grading - docs from latest issues ARE relevant by definition.
     """
-    print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
+    start_time = time.time()
+    print("---CHECK DOCUMENT RELEVANCE TO QUESTION---", flush=True)
     question = state["question"]
     documents = state["documents"]
     api_key = state["api_key"]
     
+    # SKIP GRADING for temporal queries - they found the latest issue, that's what user asked for
+    if state.get("temporal_retrieval", False):
+        print("---TEMPORAL QUERY: SKIPPING GRADING - DOCS ARE RELEVANT BY DEFINITION---", flush=True)
+        grades = [
+            {
+                "doc_index": i,
+                "relevant": True,
+                "source": d.metadata.get("source", "unknown"),
+                "content_preview": d.page_content[:100] + "...",
+                "reason": "temporal_auto_pass"
+            }
+            for i, d in enumerate(documents)
+        ]
+        logger.log_document_grades(grades)
+        return {"documents": documents, "question": question, "web_search": False}
+    
     grader = get_grading_agent(api_key)
     filtered_docs = []
     web_search_flag = False
+    grades = []
     
-    for d in documents:
+    retry_count = state.get("retry_count", 0)
+    
+    for i, d in enumerate(documents):
         score = grader.invoke({"question": question, "document": d.page_content})
         grade = score.binary_score
+        grade_info = {
+            "doc_index": i,
+            "relevant": grade == "yes",
+            "source": d.metadata.get("source", "unknown"),
+            "content_preview": d.page_content[:100] + "..."
+        }
+        grades.append(grade_info)
+        
         if grade == "yes":
-            print("---GRADE: DOCUMENT RELEVANT---")
+            print("---GRADE: DOCUMENT RELEVANT---", flush=True)
             filtered_docs.append(d)
         else:
-            print("---GRADE: DOCUMENT NOT RELEVANT---")
+            print("---GRADE: DOCUMENT NOT RELEVANT---", flush=True)
             continue
             
     if not filtered_docs:
-        print("---NO RELEVANT DOCS FOUND: SETTING WEB SEARCH FLAG---")
-        web_search_flag = True
-        
+        # If max retries reached, use original docs anyway (better than nothing)
+        if retry_count >= MAX_RETRIES:
+            print(f"---NO RELEVANT DOCS BUT MAX RETRIES ({retry_count}) REACHED - USING ORIGINAL DOCS---", flush=True)
+            filtered_docs = documents  # Use all docs, let generate handle it
+            web_search_flag = False
+        else:
+            print("---NO RELEVANT DOCS FOUND: WILL TRANSFORM QUERY AND RE-RETRIEVE---", flush=True)
+            web_search_flag = True
+    
+    duration_ms = (time.time() - start_time) * 1000
+    logger.log_document_grades(grades)
+    
     return {"documents": filtered_docs, "question": question, "web_search": web_search_flag}
 
 def transform_query(state):
@@ -161,12 +254,18 @@ def transform_query(state):
     Transform the query to produce a better question.
     Increments retry counter to prevent infinite loops.
     """
+    start_time = time.time()
     retry_count = state.get("retry_count", 0) + 1
+    generation_count = state.get("generation_count", 0)
     print(f"---TRANSFORM QUERY (retry {retry_count}/{MAX_RETRIES})---", flush=True)
+    
+    # Log retry increment
+    logger.log_retry(retry_count, generation_count, "query_transform")
     
     # If we've exceeded retries, don't bother rewriting - just pass through
     if retry_count > MAX_RETRIES:
         print("---MAX RETRIES EXCEEDED - SKIPPING REWRITE---", flush=True)
+        logger.log_limit_reached("retry_count", retry_count, MAX_RETRIES)
         return {"retry_count": retry_count}
     
     question = state["question"]
@@ -175,17 +274,28 @@ def transform_query(state):
     
     rewriter = get_rewriter_agent(api_key)
     better_question = rewriter.invoke({"question": question})
+    
+    duration_ms = (time.time() - start_time) * 1000
+    logger.log_query_transform(question, better_question.content, f"retry_{retry_count}")
+    
     return {"documents": documents, "question": better_question.content, "retry_count": retry_count}
 
 def web_search_node(state):
     """
     Web search based on the re-phrased question.
     """
-    print("---WEB SEARCH---")
+    start_time = time.time()
+    print("---WEB SEARCH---", flush=True)
     question = state["question"]
     
     results = web_search(question)
     docs = [Document(page_content=results, metadata={"source": "web_search"})]
+    
+    duration_ms = (time.time() - start_time) * 1000
+    
+    # Parse results for logging
+    result_count = results.count("Title:") if results else 0
+    logger.log_web_search(question, "multi_strategy", [{"content_preview": results[:500]}], duration_ms)
     
     return {"documents": docs, "question": question}
 
@@ -203,13 +313,19 @@ def check_safety(state):
 
 def decide_to_generate(state):
     """
-    Determines whether to generate an answer, or re-generate a question.
+    Determines whether to generate an answer, or re-transform the query.
+    If docs not relevant, re-try with transformed query (back to retrieve).
     """
     print("---DECIDE TO GENERATE---")
     web_search_flag = state["web_search"]
+    retry_count = state.get("retry_count", 0)
     
     if web_search_flag:
-        print("---DECISION: TRANSFORM QUERY and WEB SEARCH---")
+        # Check if we've already retried too many times
+        if retry_count >= MAX_RETRIES:
+            print(f"---DECISION: GENERATE (max retries {retry_count} reached, using whatever we have)---")
+            return "generate"
+        print("---DECISION: TRANSFORM QUERY and RE-RETRIEVE---")
         return "transform_query"
     else:
         print("---DECISION: GENERATE---")
@@ -231,11 +347,17 @@ def grade_generation_v_documents_and_question(state):
     # Check BOTH limits - if either exceeded, accept whatever we have
     if retry_count >= MAX_RETRIES or generation_count >= MAX_GENERATION_CALLS:
         print(f"---LIMIT REACHED (retries={retry_count}, generations={generation_count}) - ACCEPTING ANSWER---", flush=True)
+        logger.log_limit_reached("combined", retry_count + generation_count, MAX_RETRIES + MAX_GENERATION_CALLS)
         return "useful"  # Accept the answer to break the loop
     
     hallucination_grader = get_hallucination_grader(api_key)
     score = hallucination_grader.invoke({"documents": documents, "generation": generation})
     grade = score.binary_score
+    
+    logger.log_grading_result("hallucination", grade, {
+        "generation_preview": generation[:200] + "...",
+        "doc_count": len(documents)
+    })
     
     if grade == "yes":
         print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---", flush=True)
@@ -244,6 +366,12 @@ def grade_generation_v_documents_and_question(state):
         answer_grader = get_answer_grader(api_key)
         score = answer_grader.invoke({"question": question, "generation": generation})
         grade = score.binary_score
+        
+        logger.log_grading_result("answer", grade, {
+            "question": question,
+            "generation_preview": generation[:200] + "..."
+        })
+        
         if grade == "yes":
             print("---DECISION: GENERATION ADDRESSES QUESTION---", flush=True)
             return "useful"
@@ -257,18 +385,52 @@ def grade_generation_v_documents_and_question(state):
 def route_question(state):
     """
     Route question to web search or RAG.
+    PRIORITY: Always use vectorstore if database has data.
+    Web search is only for empty database scenarios.
     """
-    print("---ROUTE QUESTION---")
+    start_time = time.time()
+    print("---ROUTE QUESTION---", flush=True)
     question = state["question"]
     api_key = state["api_key"]
+    retriever = state.get("retriever")
+    
+    # Check if database has data - if yes, ALWAYS use vectorstore
+    db_has_data = retriever and hasattr(retriever, 'bm25_docs') and len(retriever.bm25_docs) > 0
+    
+    if db_has_data:
+        duration_ms = (time.time() - start_time) * 1000
+        print(f"---ROUTE: VECTORSTORE (DB has {len(retriever.bm25_docs)} docs)---", flush=True)
+        logger.log_event(EventType.ROUTING_DECISION, {
+            "route": "vectorstore",
+            "question": question,
+            "reason": "database_has_data",
+            "doc_count": len(retriever.bm25_docs),
+            "duration_ms": duration_ms
+        }, duration_ms=duration_ms)
+        return "vectorstore"
+    
+    # Only use router agent if database is empty
     router = get_router_agent(api_key)
     source = router.invoke({"question": question})
     
+    duration_ms = (time.time() - start_time) * 1000
+    
     if source.datasource == "web_search":
-        print("---ROUTE: WEB SEARCH---")
+        print("---ROUTE: WEB SEARCH (DB empty)---", flush=True)
+        logger.log_event(EventType.ROUTING_DECISION, {
+            "route": "web_search",
+            "question": question,
+            "reason": "database_empty",
+            "duration_ms": duration_ms
+        }, duration_ms=duration_ms)
         return "web_search"
     elif source.datasource == "vectorstore":
-        print("---ROUTE: RAG---")
+        print("---ROUTE: RAG---", flush=True)
+        logger.log_event(EventType.ROUTING_DECISION, {
+            "route": "vectorstore",
+            "question": question,
+            "duration_ms": duration_ms
+        }, duration_ms=duration_ms)
         return "vectorstore"
 
 def build_graph():
@@ -315,7 +477,8 @@ def build_graph():
         },
     )
     
-    workflow.add_edge("transform_query", "web_search")
+    # transform_query goes back to retrieve (not web_search) to re-try with better query
+    workflow.add_edge("transform_query", "retrieve")
     
     workflow.add_conditional_edges(
         "generate",

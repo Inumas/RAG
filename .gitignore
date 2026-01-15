@@ -1,7 +1,11 @@
-.env
+﻿.env
 __pycache__/
 *.pyc
 .venv/
 .DS_Store
 
-# Documentation and Task files
+# Database (too large for GitHub)
+chroma_db/
+
+# Logs (session-specific)
+logs/

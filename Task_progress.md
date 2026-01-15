@@ -56,3 +56,25 @@
   3. **Answer Grader Fix** (`src/agents.py`): Made grader lenient - accepts partial answers
   4. **Generate Fallback** (`src/graph.py`): Graceful handling of empty context
 - **Result**: Loop now exits after 3 retries with best-effort answer.
+
+- **Status**: Phase 8 Implementation Complete (Comprehensive Logging)
+- **Goal**: Create traceable logs for debugging and analysis of RAG pipeline
+- **Files Created**:
+  1. `src/logger.py` - RAGLogger class with 20+ event types
+  2. `src/log_viewer.py` - CLI tool for viewing/analyzing logs
+- **Files Modified**:
+  1. `src/graph.py` - All nodes now log events with timing
+  2. `src/rag_engine.py` - Session start/end logging
+- **Logged Events**:
+  - User input and safety checks
+  - Routing decisions (vectorstore vs web_search)
+  - Document retrieval with sources
+  - Document grading results
+  - Query transformations (with full history)
+  - Web search strategies and results
+  - LLM generation (context size, response length, duration)
+  - Hallucination and answer grading
+  - Retry counts and limit breaches
+  - Errors with full context
+- **Log Output**: JSON files in `logs/` directory, named `YYYY-MM-DD_HH-MM-SS_<session_id>.json`
+- **Usage**: `python src/log_viewer.py --list` or `python src/log_viewer.py <session_id>`
