@@ -1,9 +1,16 @@
 import requests
 from bs4 import BeautifulSoup
 import os
+import re
+from datetime import datetime
 from langchain_core.documents import Document
 
 BASE_URL = "https://www.deeplearning.ai/the-batch/"
+SITEMAP_URLS = [
+    'https://www.deeplearning.ai/sitemap-0.xml',
+    'https://www.deeplearning.ai/sitemap-1.xml',
+]
+EXCLUDE_PATTERNS = ['/tag/', '/about/', '/subscribe', '/page/']
 
 def get_article_links():
     """Scrapes the main page for article links."""
@@ -33,12 +40,98 @@ def get_article_links():
         print(f"Error scraping main page: {e}")
         return []
 
+
+def get_all_batch_urls_from_sitemap():
+    """
+    Discover ALL Batch URLs from sitemap, sorted by lastmod date (most recent first).
+    Returns list of (url, lastmod_date) tuples.
+    """
+    all_urls = []
+    
+    for sitemap_url in SITEMAP_URLS:
+        try:
+            print(f"Fetching {sitemap_url}...")
+            response = requests.get(sitemap_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'xml')
+            
+            for url_tag in soup.find_all('url'):
+                loc = url_tag.find('loc')
+                lastmod = url_tag.find('lastmod')
+                
+                if loc:
+                    url = loc.text
+                    # Filter for Batch content only
+                    if '/the-batch/' in url and not any(ex in url for ex in EXCLUDE_PATTERNS):
+                        # Skip main page
+                        if url.rstrip('/') != 'https://www.deeplearning.ai/the-batch':
+                            lastmod_date = lastmod.text if lastmod else "1970-01-01"
+                            all_urls.append((url, lastmod_date))
+        except Exception as e:
+            print(f"Error fetching {sitemap_url}: {e}")
+    
+    # Sort by lastmod date (most recent first)
+    all_urls.sort(key=lambda x: x[1], reverse=True)
+    
+    # Deduplicate while preserving order
+    seen = set()
+    unique_urls = []
+    for url, date in all_urls:
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append((url, date))
+    
+    print(f"Found {len(unique_urls)} unique Batch URLs")
+    return unique_urls
+
+
+def get_existing_urls_from_db():
+    """Get all URLs already in the database."""
+    try:
+        from database import get_vectorstore
+        vs = get_vectorstore()
+        results = vs.get()
+        
+        existing_urls = set()
+        for metadata in results.get('metadatas', []):
+            if metadata and 'source' in metadata:
+                existing_urls.add(metadata['source'])
+        
+        return existing_urls
+    except Exception as e:
+        print(f"Error getting existing URLs: {e}")
+        return set()
+
+
+def classify_content_type(url, soup=None):
+    """Classify URL into content type based on URL pattern and page content."""
+    # Check URL pattern first
+    if '/issue-' in url:
+        # Extract issue number
+        match = re.search(r'/issue-(\d+)', url)
+        issue_num = int(match.group(1)) if match else None
+        return "issue", issue_num
+    
+    # For non-issue URLs, check page content if soup is provided
+    if soup:
+        page_text = soup.get_text()
+        if "Data Points" in page_text:
+            return "data_points", None
+        elif "Andrew" in page_text and ("Letter" in page_text or "letter" in page_text):
+            return "letter", None
+    
+    return "article", None
+
+
 def scrape_article(url):
     """Scrapes a single article for title, text, and main image."""
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Classify content type
+        content_type, issue_number = classify_content_type(url, soup)
         
         # Title
         h1 = soup.find('h1')
@@ -54,6 +147,29 @@ def scrape_article(url):
         img_tag = soup.find('img', src=lambda x: x and 'charonhub.deeplearning.ai/content/images' in x)
         if img_tag:
             image_url = img_tag['src']
+
+        # Publish Date - try multiple common meta tag formats
+        publish_date = None
+        date_meta = soup.find('meta', property='article:published_time')
+        if date_meta:
+            publish_date = date_meta.get('content')
+        else:
+            # Fallback: try other common meta tags
+            for selector in [
+                {'name': 'date'},
+                {'name': 'publish-date'},
+                {'name': 'DC.date'},
+                {'property': 'og:published_time'},
+            ]:
+                date_meta = soup.find('meta', selector)
+                if date_meta:
+                    publish_date = date_meta.get('content')
+                    break
+            # Fallback: try time element
+            if not publish_date:
+                time_elem = soup.find('time', {'datetime': True})
+                if time_elem:
+                    publish_date = time_elem.get('datetime')
 
         # Parse sections
         content_chunks = []
@@ -85,14 +201,19 @@ def scrape_article(url):
                 if current_text:
                     full_text = " ".join(current_text).strip()
                     if full_text:
+                        metadata = {
+                            "source": url,
+                            "title": title,
+                            "image_url": image_url or "",
+                            "section_header": current_section,
+                            "publish_date": publish_date or "",
+                            "content_type": content_type,
+                        }
+                        if issue_number:
+                            metadata["issue_number"] = issue_number
                         content_chunks.append(Document(
                             page_content=full_text,
-                            metadata={
-                                "source": url,
-                                "title": title,
-                                "image_url": image_url or "",
-                                "section_header": current_section
-                            }
+                            metadata=metadata
                         ))
                 # Start new section
                 current_section = element.get_text(separator=' ', strip=True)
@@ -111,14 +232,19 @@ def scrape_article(url):
         if current_text:
             full_text = " ".join(current_text).strip()
             if full_text:
+                metadata = {
+                    "source": url,
+                    "title": title,
+                    "image_url": image_url or "",
+                    "section_header": current_section,
+                    "publish_date": publish_date or "",
+                    "content_type": content_type,
+                }
+                if issue_number:
+                    metadata["issue_number"] = issue_number
                 content_chunks.append(Document(
                     page_content=full_text,
-                    metadata={
-                        "source": url,
-                        "title": title,
-                        "image_url": image_url or "",
-                        "section_header": current_section
-                    }
+                    metadata=metadata
                 ))
 
         return content_chunks
@@ -126,28 +252,62 @@ def scrape_article(url):
         print(f"Error scraping article {url}: {e}")
         return None
 
-def load_data(start_issue=None, end_issue=None):
+def load_data(mode="issues", start_issue=None, end_issue=None, max_articles=None, skip_existing=True):
     """
-    Main function to load data.
-    If start_issue and end_issue are provided, scrapes that range.
-    Otherwise scrapes the main page.
+    Main function to load data with multiple modes.
+    
+    Args:
+        mode: "sitemap" (all from sitemap), "issues" (issue range), "recent" (main page)
+        start_issue: Start issue number (for mode="issues")
+        end_issue: End issue number (for mode="issues")
+        max_articles: Maximum articles to ingest (for mode="sitemap")
+        skip_existing: Skip URLs already in database (for mode="sitemap")
+    
+    Returns:
+        List of Document objects
     """
     documents = []
     
-    if start_issue is not None and end_issue is not None:
+    if mode == "sitemap":
+        # Get all URLs from sitemap (sorted by date, most recent first)
+        all_urls = get_all_batch_urls_from_sitemap()
+        
+        # Filter out existing URLs if requested
+        if skip_existing:
+            existing_urls = get_existing_urls_from_db()
+            print(f"Found {len(existing_urls)} URLs already in database")
+            all_urls = [(url, date) for url, date in all_urls if url not in existing_urls]
+            print(f"After filtering: {len(all_urls)} new URLs to ingest")
+        
+        # Limit to max_articles if specified
+        if max_articles:
+            all_urls = all_urls[:max_articles]
+        
+        print(f"Ingesting {len(all_urls)} articles...")
+        
+        for i, (url, lastmod) in enumerate(all_urls):
+            print(f"[{i+1}/{len(all_urls)}] Scraping {url}...")
+            article_docs = scrape_article(url)
+            if article_docs:
+                documents.extend(article_docs)
+            else:
+                print(f"  Skipping (no content or error)")
+            
+            # Progress indicator every 50 articles
+            if (i + 1) % 50 == 0:
+                print(f"Progress: {i+1}/{len(all_urls)} articles processed, {len(documents)} documents created")
+    
+    elif mode == "issues" and start_issue is not None and end_issue is not None:
         print(f"Scraping issues {start_issue} to {end_issue}...")
         for i in range(start_issue, end_issue + 1):
             url = f"{BASE_URL}issue-{i}/"
             print(f"Scraping {url}...")
             article_docs = scrape_article(url)
             if article_docs:
-                # Add metadata to indicate it's an issue
-                for doc in article_docs:
-                    doc.metadata["type"] = "issue"
-                    doc.metadata["issue_number"] = i
                 documents.extend(article_docs)
             else:
                 print(f"Skipping issue {i} (404 or empty)")
+    
     else:
         # Default behavior: Scrape main page links
         links = get_article_links()
@@ -159,6 +319,19 @@ def load_data(start_issue=None, end_issue=None):
                 documents.extend(article_docs)
                 
     return documents
+
+
+def load_incremental(max_new=100):
+    """
+    Load only NEW articles that aren't in the database yet.
+    
+    Args:
+        max_new: Maximum number of new articles to ingest
+        
+    Returns:
+        List of Document objects (only new ones)
+    """
+    return load_data(mode="sitemap", max_articles=max_new, skip_existing=True)
 
 if __name__ == "__main__":
     docs = load_data()

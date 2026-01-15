@@ -46,33 +46,55 @@ with st.sidebar:
     
     st.divider()
     
-    ingestion_mode = st.radio("Ingestion Mode", ["Recent Articles", "Historical Issues"])
+    ingestion_mode = st.radio(
+        "Ingestion Mode", 
+        ["📥 Add Missing (100)", "🗂️ Full Sitemap (1000)", "📰 Issue Range", "🔗 Single URL"]
+    )
     
     start_issue = 330
     end_issue = 334
+    max_articles = 100
+    custom_url = ""
     
-    if ingestion_mode == "Historical Issues":
+    if ingestion_mode == "📰 Issue Range":
         c1, c2 = st.columns(2)
         start_issue = c1.number_input("Start Issue", min_value=1, value=330)
         end_issue = c2.number_input("End Issue", min_value=1, value=334)
+    elif ingestion_mode == "🗂️ Full Sitemap (1000)":
+        max_articles = st.slider("Max articles to ingest", 100, 2000, 1000)
+        st.info(f"⏱️ Estimated time: ~{max_articles * 2 // 60} minutes")
+    elif ingestion_mode == "🔗 Single URL":
+        custom_url = st.text_input("Article URL", placeholder="https://www.deeplearning.ai/the-batch/...")
+    
+    clear_db = st.checkbox("Clear existing database first?", value=False)
     
     if st.button("🔄 Ingest Data"):
         if not api_key:
             st.error("Please enter an OpenAI API Key first.")
         else:
             with st.status("Ingesting data...", expanded=True) as status:
-                # Only clear if we are doing a fresh start? Or maybe append?
-                # For this demo, we'll keep it simple: option to clear
-                if st.checkbox("Clear existing database?", value=False):
+                if clear_db:
                     st.write("Clearing old database...")
                     clear_database()
                 
-                if ingestion_mode == "Historical Issues":
+                docs = []
+                
+                if ingestion_mode == "📰 Issue Range":
                     st.write(f"Scraping Issues {start_issue} to {end_issue}...")
-                    docs = load_data(start_issue=start_issue, end_issue=end_issue)
-                else:
-                    st.write("Scraping recent articles...")
-                    docs = load_data()
+                    docs = load_data(mode="issues", start_issue=start_issue, end_issue=end_issue)
+                
+                elif ingestion_mode == "🗂️ Full Sitemap (1000)":
+                    st.write(f"Fetching {max_articles} most recent articles from sitemap...")
+                    docs = load_data(mode="sitemap", max_articles=max_articles, skip_existing=True)
+                
+                elif ingestion_mode == "📥 Add Missing (100)":
+                    st.write("Finding and ingesting 100 new articles not in database...")
+                    docs = load_data(mode="sitemap", max_articles=100, skip_existing=True)
+                
+                elif ingestion_mode == "🔗 Single URL" and custom_url:
+                    st.write(f"Scraping {custom_url}...")
+                    from ingestion import scrape_article
+                    docs = scrape_article(custom_url) or []
                 
                 st.write(f"Scraped {len(docs)} documents.")
                 
@@ -80,10 +102,10 @@ with st.sidebar:
                     st.write("Indexing into Vector DB...")
                     index_documents(docs)
                 else:
-                    st.warning("No documents found.")
+                    st.warning("No new documents found.")
                 
                 status.update(label="Ingestion Complete!", state="complete", expanded=False)
-            st.success("Data ready!")
+            st.success("Data ready! Refresh retriever by reloading the page.")
 
 # Main Chat Interface
 if "messages" not in st.session_state:

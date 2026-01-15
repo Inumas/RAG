@@ -101,3 +101,65 @@ The system is modeled as a State Graph:
 
 4.  **Usage**:
     Enter your OpenAI API Key in the sidebar when the app launches in your browser.
+
+## Logging & Debugging
+
+The system includes comprehensive logging for debugging and analysis.
+
+### Log Files
+Every query creates a JSON log file in the `logs/` directory:
+```
+logs/
+├── 2026-01-15_14-30-22_a1b2c3d4.json
+├── 2026-01-15_14-35-10_e5f6g7h8.json
+└── ...
+```
+
+### What Gets Logged
+| Category | Details |
+|----------|---------|
+| **Session** | Start/end time, total duration, success/failure |
+| **User Input** | Original query, safety check result |
+| **Routing** | Decision (vectorstore vs web_search) |
+| **Retrieval** | Documents retrieved, sources, relevance grades |
+| **Query Transforms** | Full history of query rewrites |
+| **Generation** | Context size, response length, attempt count |
+| **Grading** | Hallucination check, answer relevance check |
+| **Errors** | Exception type, message, context |
+
+### Log Viewer CLI
+```powershell
+# Activate virtual environment first
+.\.venv\Scripts\Activate.ps1
+
+# Show latest log with formatted output
+python src/log_viewer.py
+
+# List all available logs
+python src/log_viewer.py --list
+
+# Show summary of all sessions
+python src/log_viewer.py --summary
+
+# View specific session by ID
+python src/log_viewer.py a1b2c3d4
+
+# Verbose mode (all events)
+python src/log_viewer.py --verbose
+```
+
+### Sample Log Output
+```
+═══════════════════════════════════════════════════════════════════
+📋 SESSION SUMMARY
+───────────────────────────────────────────────────────────────────
+  Session ID:       a1b2c3d4
+  Status:           ✅ SUCCESS
+  Duration:         2.3s
+  Total Steps:      15
+  Query Rewrites:   2
+───────────────────────────────────────────────────────────────────
+  Original Query:   summarize the most recent article from The Batch
+  Final Query:      The Batch DeepLearning.AI newsletter latest...
+═══════════════════════════════════════════════════════════════════
+```
