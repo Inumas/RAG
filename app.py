@@ -33,6 +33,19 @@ with st.sidebar:
     
     st.divider()
     
+    # Database status indicator
+    try:
+        retriever = get_retriever()
+        doc_count = len(retriever.bm25_docs)
+        if doc_count > 0:
+            st.success(f"📚 Database: {doc_count} documents indexed")
+        else:
+            st.warning("📭 Database: Empty - Please ingest data first")
+    except Exception:
+        st.info("📭 Database: Not initialized")
+    
+    st.divider()
+    
     ingestion_mode = st.radio("Ingestion Mode", ["Recent Articles", "Historical Issues"])
     
     start_issue = 330
@@ -103,6 +116,12 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                 try:
                     # Get cached retriever
                     retriever = get_retriever()
+                    
+                    # Check if database has documents - warn user if empty
+                    if len(retriever.bm25_docs) == 0:
+                        st.warning("⚠️ **No documents in database.** The system will use web search only. "
+                                   "For best results, click '🔄 Ingest Data' in the sidebar first.")
+                    
                     result = query_rag(prompt, api_key, retriever)
                     answer = result["answer"]
                     sources = result["source_documents"]

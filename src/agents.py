@@ -92,8 +92,15 @@ def get_answer_grader(api_key):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
     structured_llm_grader = llm.with_structured_output(GradeAnswer)
     
-    system = """You are a grader assessing whether an answer addresses / resolves a question. \n 
-    Give a binary score 'yes' or 'no'. 'yes' means the answer resolves the question."""
+    system = """You are a lenient grader assessing whether an answer is relevant to a question.
+
+Give a binary score 'yes' or 'no':
+- 'yes' if the answer provides ANY relevant information about the topic, even if partial
+- 'yes' if the answer mentions related concepts, people, or events from the domain
+- 'yes' if the answer acknowledges the topic and provides context
+- 'no' ONLY if the answer is completely off-topic or says "I don't know" with no useful info
+
+Be generous - partial answers are acceptable. The goal is to avoid infinite retry loops."""
     
     answer_prompt = ChatPromptTemplate.from_messages(
         [
@@ -107,8 +114,25 @@ def get_rewriter_agent(api_key):
     """Returns a runnable chain that rewrites the query."""
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
     
-    system = """You a question re-writer that converts an input question to a better version that is optimized \n 
-    for web search. Look at the input and try to reason about the underlying semantic intent / meaning."""
+    system = """You are a question re-writer that optimizes queries for web search.
+
+CRITICAL CONTEXT: This system is about "The Batch" newsletter by DeepLearning.AI, 
+which covers AI news, machine learning research, and tech industry updates.
+
+When rewriting queries:
+1. ALWAYS include '"The Batch" DeepLearning.AI' or 'deeplearning.ai newsletter' in your rewritten query
+2. Preserve any specific topics, dates, or article references mentioned
+3. Make the query more specific to AI/ML content, not more generic
+4. Focus on finding content from the newsletter, not general web results
+
+Examples:
+- Input: "summarize the most recent article" 
+  Output: "The Batch DeepLearning.AI newsletter latest article summary"
+- Input: "what did Andrew Ng say about LLMs"
+  Output: "The Batch DeepLearning.AI Andrew Ng LLMs large language models"
+- Input: "recent AI news"
+  Output: "The Batch DeepLearning.AI recent AI news machine learning updates"
+"""
     
     re_write_prompt = ChatPromptTemplate.from_messages(
         [

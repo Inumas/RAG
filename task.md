@@ -28,3 +28,15 @@
     - [x] **Input Guardrails**: Detect malicious/jailbreak attempts (Input Gate) <!-- id: 5.2 -->
     - [x] **Output Guardrails**: Moderate final answer (Output Gate) <!-- id: 5.3 -->
     - [x] **System Robustness**: Handle recursion limits (GraphRecursionError) gracefully <!-- id: 5.4 -->
+
+- [x] **Phase 6: Domain Context Preservation (Bug Fixes)** <!-- id: 6 -->
+    - [x] **Query Rewriter Fix**: Update prompt to preserve "The Batch" DeepLearning.AI context <!-- id: 6.1 -->
+    - [x] **Web Search Enhancement**: Add domain context to search queries <!-- id: 6.2 -->
+    - [x] **Empty DB Handling**: Warn user if vectorstore is empty before querying <!-- id: 6.3 -->
+    - [x] **Verification**: Test with "summarize the most recent article from the batch" <!-- id: 6.4 -->
+
+- [x] **Phase 7: Infinite Loop Prevention (Critical Bug Fix)** <!-- id: 7 -->
+    - [x] **Retry Counter**: Add retry_count to GraphState to track loop iterations <!-- id: 7.1 -->
+    - [x] **Web Search Fallback**: Multi-strategy search (site-restrict → domain context → raw) <!-- id: 7.2 -->
+    - [x] **Answer Grader Fix**: Made grader more lenient to accept partial answers <!-- id: 7.3 -->
+    - [x] **Generate Fallback**: Handle empty context gracefully with helpful message <!-- id: 7.4 -->
