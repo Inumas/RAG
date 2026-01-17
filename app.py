@@ -105,7 +105,11 @@ with st.sidebar:
                     st.warning("No new documents found.")
                 
                 status.update(label="Ingestion Complete!", state="complete", expanded=False)
-            st.success("Data ready! Refresh retriever by reloading the page.")
+            
+            # Clear cache to force retriever reload with new data
+            st.cache_resource.clear()
+            st.success("Data ready! Refreshing...")
+            st.rerun()
 
 # Main Chat Interface
 if "messages" not in st.session_state:
