@@ -3,7 +3,7 @@ import os
 import argparse
 
 # Add src to path
-sys.path.append(os.path.join(os.getcwd(), 'src'))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from web_search import web_search
 from agents import get_router_agent, get_grading_agent, get_rewriter_agent

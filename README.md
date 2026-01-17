@@ -163,3 +163,23 @@ python src/log_viewer.py --verbose
   Final Query:      The Batch DeepLearning.AI newsletter latest...
 ═══════════════════════════════════════════════════════════════════
 ```
+
+## Testing
+To run the automated test suite (including E2E smoke tests):
+
+1. **Install Test Dependencies** (if not done):
+   ```powershell
+   pip install pytest
+   ```
+
+2. **Run All Tests**:
+   ```powershell
+   python -m pytest tests/
+   ```
+
+3. **Run E2E Smoke Tests Only**:
+   ```powershell
+   python -m pytest tests/test_e2e_smoke.py -v
+   ```
+
+   *Note: Smoke tests perform real ingestion and querying. Ensure your `OPENAI_API_KEY` is set in `.env`.*
