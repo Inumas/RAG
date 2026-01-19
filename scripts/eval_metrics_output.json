@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-01-19T17:43:40.972075",
+  "retrieval_metrics": {
+    "by_k": {
+      "k5": {
+        "precision": 0.867,
+        "mrr": 0.861,
+        "hit_rate": 0.9,
+        "ndcg": 0.844,
+        "n_labeled": 30
+      }
+    },
+    "by_category": {
+      "edge_case_jailbreak": {
+        "precision_at_5": 0.0,
+        "n_queries": 1
+      },
+      "factual": {
+        "precision_at_5": 0.96,
+        "n_queries": 10
+      },
+      "analytical": {
+        "precision_at_5": 1.0,
+        "n_queries": 4
+      },
+      "edge_case_nonsense": {
+        "precision_at_5": 0.0,
+        "n_queries": 1
+      },
+      "edge_case_offtopic": {
+        "precision_at_5": 0.3,
+        "n_queries": 2
+      },
+      "entity": {
+        "precision_at_5": 1.0,
+        "n_queries": 6
+      },
+      "temporal": {
+        "precision_at_5": 0.967,
+        "n_queries": 6
+      }
+    },
+    "overall": {}
+  },
+  "generation_metrics_from_logs": {
+    "total_sessions": 18,
+    "successful_sessions": 18,
+    "hallucination_passed": 13,
+    "answer_check_passed": 13,
+    "query_rewrites": 9,
+    "avg_duration_ms": 11790.0,
+    "avg_steps": 11.7,
+    "by_source_type": {
+      "vectorstore": 14,
+      "web_search": 0
+    },
+    "success_rate": 1.0,
+    "hallucination_pass_rate": 0.722,
+    "answer_pass_rate": 0.722
+  },
+  "multimodal_analysis": {
+    "total_retrievals": 150,
+    "with_image": 46,
+    "without_image": 104,
+    "by_category": {
+      "factual": {
+        "total": 50,
+        "with_image": 20
+      },
+      "temporal": {
+        "total": 30,
+        "with_image": 2
+      },
+      "entity": {
+        "total": 30,
+        "with_image": 6
+      },
+      "analytical": {
+        "total": 20,
+        "with_image": 10
+      },
+      "edge_case_offtopic": {
+        "total": 10,
+        "with_image": 1
+      },
+      "edge_case_jailbreak": {
+        "total": 5,
+        "with_image": 4
+      },
+      "edge_case_nonsense": {
+        "total": 5,
+        "with_image": 3
+      }
+    },
+    "image_rate": 0.307
+  }
+}

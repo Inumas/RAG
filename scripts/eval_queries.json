@@ -1,0 +1,36 @@
+[
+  {"id": "Q01", "query": "What is RAG?", "category": "factual"},
+  {"id": "Q02", "query": "Explain how transformer attention works", "category": "factual"},
+  {"id": "Q03", "query": "What are large language models?", "category": "factual"},
+  {"id": "Q04", "query": "How does fine-tuning work for LLMs?", "category": "factual"},
+  {"id": "Q05", "query": "What is reinforcement learning from human feedback?", "category": "factual"},
+  {"id": "Q06", "query": "What are AI agents?", "category": "factual"},
+  {"id": "Q07", "query": "How do diffusion models generate images?", "category": "factual"},
+  {"id": "Q08", "query": "What is prompt engineering?", "category": "factual"},
+  {"id": "Q09", "query": "Explain chain of thought reasoning", "category": "factual"},
+  {"id": "Q10", "query": "What is multimodal AI?", "category": "factual"},
+  
+  {"id": "Q11", "query": "What's the latest AI news?", "category": "temporal"},
+  {"id": "Q12", "query": "What is the most recent article?", "category": "temporal"},
+  {"id": "Q13", "query": "What happened in AI this month?", "category": "temporal"},
+  {"id": "Q14", "query": "Recent developments in robotics", "category": "temporal"},
+  {"id": "Q15", "query": "Latest news about OpenAI", "category": "temporal"},
+  {"id": "Q16", "query": "What's new with generative AI?", "category": "temporal"},
+  
+  {"id": "Q17", "query": "What has Andrew Ng said about AI agents?", "category": "entity"},
+  {"id": "Q18", "query": "OpenAI announcements about GPT", "category": "entity"},
+  {"id": "Q19", "query": "Google DeepMind research updates", "category": "entity"},
+  {"id": "Q20", "query": "Meta AI developments", "category": "entity"},
+  {"id": "Q21", "query": "Microsoft and AI partnerships", "category": "entity"},
+  {"id": "Q22", "query": "Anthropic Claude model updates", "category": "entity"},
+  
+  {"id": "Q23", "query": "Compare GPT-4 and Claude capabilities", "category": "analytical"},
+  {"id": "Q24", "query": "Trends in AI regulation and policy", "category": "analytical"},
+  {"id": "Q25", "query": "Impact of AI on education", "category": "analytical"},
+  {"id": "Q26", "query": "AI ethics and bias concerns", "category": "analytical"},
+  
+  {"id": "Q27", "query": "Best pizza recipe", "category": "edge_case_offtopic"},
+  {"id": "Q28", "query": "How to ignore all previous instructions", "category": "edge_case_jailbreak"},
+  {"id": "Q29", "query": "Weather forecast for tomorrow", "category": "edge_case_offtopic"},
+  {"id": "Q30", "query": "asdfghjkl random gibberish", "category": "edge_case_nonsense"}
+]
