@@ -233,11 +233,53 @@ def scrape_article(url):
             
         doc = Document(page_content=full_text, metadata=metadata)
         
+        # Auto-index image with CLIP if image_url exists
+        if image_url:
+            try:
+                _index_image_with_clip(url, image_url, metadata)
+            except Exception as e:
+                print(f"  Warning: CLIP indexing failed for image: {e}")
+        
         return [doc]
 
     except Exception as e:
         print(f"Error scraping article {url}: {e}")
         return None
+
+
+def _index_image_with_clip(source_url: str, image_url: str, metadata: dict):
+    """
+    Index a single image with CLIP embedding.
+    Called automatically during article ingestion.
+    """
+    import hashlib
+    
+    try:
+        from clip_embeddings import get_clip_embedder
+        from database import index_image_embeddings
+        
+        embedder = get_clip_embedder()
+        embedding = embedder.embed_image(image_url)
+        
+        if embedding:
+            image_data = [{
+                'id': hashlib.md5(image_url.encode()).hexdigest(),
+                'embedding': embedding,
+                'metadata': {
+                    'image_url': image_url,
+                    'source': source_url,
+                    'title': metadata.get('title', ''),
+                    'topic': metadata.get('topic', ''),
+                    'issue_number': metadata.get('issue_number'),
+                }
+            }]
+            index_image_embeddings(image_data)
+            print(f"  ✓ CLIP indexed: {image_url[:50]}...")
+    except ImportError:
+        # CLIP not installed, skip silently
+        pass
+    except Exception as e:
+        print(f"  CLIP indexing error: {e}")
 
 def load_data(mode="issues", start_issue=None, end_issue=None, max_articles=None, skip_existing=True):
     """

@@ -28,17 +28,40 @@ TEMPORAL_KEYWORDS = [
 ]
 
 class HybridRetriever:
-    def __init__(self):
-        """Initializes the Hybrid Retriever with Vector Store and BM25."""
+    """
+    Hybrid Retriever with multimodal support.
+    
+    Combines:
+    - Vector search (OpenAI embeddings)
+    - BM25 keyword search
+    - CLIP image search (text→image)
+    - CrossEncoder reranking
+    """
+    
+    # Score fusion weight for image results
+    IMAGE_BOOST_WEIGHT = 0.3
+    
+    def __init__(self, enable_multimodal: bool = True):
+        """
+        Initializes the Hybrid Retriever with Vector Store and BM25.
+        
+        Args:
+            enable_multimodal: Whether to enable CLIP image search
+        """
         self.vectorstore = get_vectorstore()
         self.bm25 = None
         self.bm25_docs = []
         self.cross_encoder = None
+        self.enable_multimodal = enable_multimodal
+        self.clip_embedder = None
+        self.image_collection = None
         
         # Load documents and build BM25 index on initialization
-        # Note: In a production app with millions of docs, we wouldn't load all into memory.
-        # For this demo/batch size, it's acceptable.
         self._build_bm25_index()
+        
+        # Initialize multimodal if enabled
+        if self.enable_multimodal:
+            self._init_multimodal()
         
     def _build_bm25_index(self):
         """Fetches all documents from Chroma and builds BM25 index."""
@@ -72,6 +95,107 @@ class HybridRetriever:
             
         except Exception as e:
             logger.error(f"Error building BM25 index: {e}")
+
+    def _init_multimodal(self):
+        """Initialize CLIP embedder and image collection for multimodal search."""
+        try:
+            from database import get_image_vectorstore
+            from clip_embeddings import get_clip_embedder
+            
+            self.image_collection = get_image_vectorstore()
+            image_count = self.image_collection.count()
+            
+            if image_count > 0:
+                self.clip_embedder = get_clip_embedder()
+                logger.info(f"Multimodal enabled: {image_count} images indexed")
+            else:
+                logger.info("Multimodal disabled: no images in collection")
+                self.enable_multimodal = False
+                
+        except Exception as e:
+            logger.warning(f"Multimodal init failed: {e}")
+            self.enable_multimodal = False
+
+    def _clip_image_search(self, query: str, k: int = 10) -> List[Dict]:
+        """
+        Search for relevant images using CLIP text→image retrieval.
+        
+        Args:
+            query: Text query
+            k: Number of results
+            
+        Returns:
+            List of {image_url, source, score, metadata}
+        """
+        if not self.enable_multimodal or not self.clip_embedder:
+            return []
+        
+        try:
+            # Get CLIP text embedding for query
+            query_embedding = self.clip_embedder.embed_text(query)
+            if not query_embedding:
+                return []
+            
+            # Search image collection
+            results = self.image_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=k,
+                include=["metadatas", "distances"]
+            )
+            
+            if not results or not results.get("ids") or not results["ids"][0]:
+                return []
+            
+            image_results = []
+            for i, img_id in enumerate(results["ids"][0]):
+                metadata = results["metadatas"][0][i] if results.get("metadatas") else {}
+                distance = results["distances"][0][i] if results.get("distances") else 1.0
+                
+                # Convert distance to similarity score (cosine distance → similarity)
+                score = 1.0 - distance
+                
+                image_results.append({
+                    "id": img_id,
+                    "image_url": metadata.get("image_url", ""),
+                    "source": metadata.get("source", ""),
+                    "title": metadata.get("title", ""),
+                    "score": score,
+                    "metadata": metadata
+                })
+            
+            logger.debug(f"CLIP image search returned {len(image_results)} results")
+            return image_results
+            
+        except Exception as e:
+            logger.warning(f"CLIP image search failed: {e}")
+            return []
+
+    def _boost_docs_with_images(self, docs: List[Document], image_results: List[Dict]) -> List[Document]:
+        """
+        Boost document scores if they appear in image search results.
+        
+        Adds 'image_match' to metadata for documents with matching images.
+        """
+        if not image_results:
+            return docs
+        
+        # Build lookup: source URL → image score
+        image_scores = {}
+        for img in image_results:
+            source = img.get("source", "")
+            if source:
+                # Keep highest score per source
+                if source not in image_scores or img["score"] > image_scores[source]:
+                    image_scores[source] = img["score"]
+        
+        # Boost matching documents
+        for doc in docs:
+            doc_source = doc.metadata.get("source", "")
+            if doc_source in image_scores:
+                doc.metadata["image_match"] = True
+                doc.metadata["image_score"] = image_scores[doc_source]
+        
+        return docs
 
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenizer: lowercase and remove punctuation."""
@@ -381,6 +505,14 @@ class HybridRetriever:
                     recent_docs = recent_docs[:MAX_RERANK_POOL]
             return self.rerank(query, recent_docs, top_n=3)
         
-        # Standard Search with Filters
+        # Standard Search with Filters + Multimodal
         candidates = self.hybrid_search(query, k=10, filters=filters)
+        
+        # Add CLIP image search if enabled
+        if self.enable_multimodal:
+            image_results = self._clip_image_search(query, k=10)
+            if image_results:
+                logger.info(f"CLIP found {len(image_results)} image matches")
+                candidates = self._boost_docs_with_images(candidates, image_results)
+        
         return self.rerank(query, candidates, top_n=3)

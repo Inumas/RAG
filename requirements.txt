@@ -2,6 +2,7 @@ streamlit
 langchain
 langchain-openai
 langchain-community
+langchain-chroma
 chromadb
 beautifulsoup4
 python-dotenv
@@ -13,3 +14,7 @@ python-magic-bin
 dateparser
 lxml
 httpx
+# CLIP multimodal
+open-clip-torch>=2.20.0
+Pillow>=10.0.0
+

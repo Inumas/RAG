@@ -190,3 +190,54 @@ To run the automated test suite (including E2E smoke tests):
    ```
 
    *Note: Smoke tests perform real ingestion and querying. Ensure your `OPENAI_API_KEY` is set in `.env`.*
+
+## Evaluation
+
+The system has been formally evaluated with the following results:
+
+### Retrieval Metrics (30 queries, k=5)
+| Metric | Value |
+|--------|-------|
+| **Precision@5** | 0.867 |
+| **MRR@5** | 0.861 |
+| **Hit Rate@5** | 0.900 |
+| **nDCG@5** | 0.844 |
+
+### Running the Evaluation
+```powershell
+# Run retrieval evaluation
+python scripts/eval_harness.py
+
+# Auto-label results (requires OPENAI_API_KEY)
+python scripts/eval_autolabel.py
+
+# Compute metrics
+python scripts/eval_metrics.py
+```
+
+### Evaluation Artifacts
+- `scripts/eval_queries.json` — 30 evaluation queries
+- `scripts/eval_results_labeled.json` — Labeled retrieval results
+- `scripts/eval_metrics_output.json` — Computed metrics
+
+## Multimodal (CLIP)
+
+The system supports **true multimodal retrieval** using CLIP image embeddings.
+
+### How It Works
+- Images are automatically indexed with CLIP during article ingestion
+- Text queries search both text AND image embeddings
+- Documents with matching images get boosted in ranking
+
+### Manual Image Indexing (if needed)
+```powershell
+# Index all existing images (one-time backfill)
+python scripts/index_images.py
+```
+
+### Image Collection Stats
+```powershell
+# Check how many images are indexed
+python -c "from src.database import get_image_collection_stats; print(get_image_collection_stats())"
+```
+

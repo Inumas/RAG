@@ -9,3 +9,6 @@ chroma_db/
 
 # Logs (session-specific)
 logs/
+
+# CLIP image cache
+.clip_cache/
