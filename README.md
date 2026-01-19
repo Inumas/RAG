@@ -23,7 +23,13 @@ This project was built using a modern AI-native stack optimized for speed of dev
 | **LLM** | [OpenAI GPT-4o-mini](https://openai.com/) | Selected for its balance of high reasoning capability, speed, and cost-effectiveness for RAG tasks (`gpt-4o-mini` is used). |
 | **Embeddings** | OpenAI `text-embedding-3-small` | State-of-the-art embedding model for semantic search, offering better performance than older Ada models at a lower cost. |
 | **Web Search** | [DuckDuckGo](https://duckduckgo.com/) | Privacy-focused web search integration (`ddgs`) to handle queries outside the knowledge base. |
-| **Scraping** | BeautifulSoup4 | Used (implicitly via `ingestion.py`) to parse HTML content from the newsletter for the RAG knowledge base. |
+| **Scraping** | [Unstructured.io](https://unstructured.io/) | Robust HTML partitioning to extract clean text, replacing brittle regex/BeautifulSoup logic. Includes **Topic Extraction** (via LLM) and **Date Standardization**. |
+
+## Key Features
+- **Semantic Search**: Find relevant articles by meaning, not just keywords.
+- **Metadata Filtering**: Filter results by **Topic** (e.g., "Policy", "Generative AI") and **Date Range**.
+- **Agentic Workflow**: Auto-corrects queries and uses web search if definitions are missing.
+- **Citations**: All answers link back to the specific source article.
 
 ## Trade-offs & Design Decisions
 
@@ -62,10 +68,11 @@ This project was built using a modern AI-native stack optimized for speed of dev
 
 The system is modeled as a State Graph:
 
-1.  **Safety Check**: User Query -> **Input Guardrail** (Check `policy.yaml`).
+1.  **Ingestion & Metadata**: Articles are scraped using `Unstructured`, and an LLM extracts **Topics** (e.g., "Robotics") and **Timestamps** for filtering.
+2.  **Safety Check**: User Query -> **Input Guardrail** (Check `policy.yaml`).
     *   If *Unsafe*: **Refuse** immediately.
     *   If *Safe*: Proceed to Routing.
-2.  **Route**: User Query -> Router Agent -> `VectorStore` OR `WebSearch`.
+3.  **Route**: User Query -> Router Agent -> `VectorStore` OR `WebSearch`.
 3.  **Retrieve (VectorStore)**: Fetch docs -> **Grade Documents Agent**.
     *   If *Relevant*: Proceed to Generate.
     *   If *Not Relevant*: **Rewrite Query** -> Loop to **Web Search**.

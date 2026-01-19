@@ -111,6 +111,27 @@ with st.sidebar:
             st.success("Data ready! Refreshing...")
             st.rerun()
 
+    st.divider()
+    st.header("🔍 Data Filters")
+    
+    # Topic Filter
+    topics = ["All", "Generative AI", "LLMs", "Computer Vision", "Robotics", "AI Ethics", "Hardware", "AI Research", "Industry News", "Policy"]
+    selected_topic = st.selectbox("Topic", topics, index=0)
+    
+    # Date Filter
+    st.subheader("Date Range")
+    start_date = st.date_input("Start Date", value=None)
+    end_date = st.date_input("End Date", value=None)
+    
+    # Construct filters dict
+    st.session_state.retrieval_filters = {}
+    if selected_topic != "All":
+        st.session_state.retrieval_filters["topic"] = selected_topic
+    if start_date:
+        st.session_state.retrieval_filters["start_date"] = start_date.strftime("%Y-%m-%d")
+    if end_date:
+        st.session_state.retrieval_filters["end_date"] = end_date.strftime("%Y-%m-%d")
+
 # Main Chat Interface
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -148,7 +169,8 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                         st.warning("⚠️ **No documents in database.** The system will use web search only. "
                                    "For best results, click '🔄 Ingest Data' in the sidebar first.")
                     
-                    result = query_rag(prompt, api_key, retriever)
+                    filters = st.session_state.get("retrieval_filters", {})
+                    result = query_rag(prompt, api_key, retriever, filters=filters)
                     answer = result["answer"]
                     sources = result["source_documents"]
                     

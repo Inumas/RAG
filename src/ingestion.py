@@ -3,7 +3,14 @@ from bs4 import BeautifulSoup
 import os
 import re
 from datetime import datetime
+import dateparser
 from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from unstructured.partition.html import partition_html
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_URL = "https://www.deeplearning.ai/the-batch/"
 SITEMAP_URLS = [
@@ -103,7 +110,7 @@ def get_existing_urls_from_db():
         return set()
 
 
-def classify_content_type(url, soup=None):
+def classify_content_type(url, text_content=""):
     """Classify URL into content type based on URL pattern and page content."""
     # Check URL pattern first
     if '/issue-' in url:
@@ -112,142 +119,122 @@ def classify_content_type(url, soup=None):
         issue_num = int(match.group(1)) if match else None
         return "issue", issue_num
     
-    # For non-issue URLs, check page content if soup is provided
-    if soup:
-        page_text = soup.get_text()
-        if "Data Points" in page_text:
-            return "data_points", None
-        elif "Andrew" in page_text and ("Letter" in page_text or "letter" in page_text):
-            return "letter", None
-    
     return "article", None
 
 
-def scrape_article(url):
-    """Scrapes a single article for title, text, and main image."""
+def extract_topic(text_preview):
+    """
+    Uses an LLM to categorize the article topic.
+    Cost-effective: Uses GPT-4o-mini on just the first 1000 chars.
+    """
     try:
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        
+        template = """
+        Analyze the following article excerpt and assign a SINGLE HIGH-LEVEL TOPIC from this list:
+        
+        [Generative AI, LLMs, Computer Vision, Robotics, AI Ethics, Hardware, AI Research, Industry News, Policy]
+        
+        If none fit perfectly, choose the closest one. Return ONLY the topic name.
+        
+        Excerpt:
+        {excerpt}
+        """
+        
+        prompt = ChatPromptTemplate.from_template(template)
+        chain = prompt | llm
+        
+        # Limit input to save tokens
+        excerpt = text_preview[:1000]
+        response = chain.invoke({"excerpt": excerpt})
+        
+        topic = response.content.strip()
+        # Basic validation (if LLM chats too much, fallback)
+        if len(topic) > 30: 
+            return "General AI"
+        return topic
+        
+    except Exception as e:
+        print(f"Error extracting topic: {e}")
+        return "Unknown"
+
+def scrape_article(url):
+    """
+    Scrapes a single article using Unstructured.io for robust layout parsing.
+    Extracts metadata including Topic (via LLM) and standardized Date.
+    """
+    try:
+        # 1. Fetch content
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Classify content type
-        content_type, issue_number = classify_content_type(url, soup)
+        # 2. Extract Metadata via BeautifulSoup (lighter than Unstructured for meta tags)
+        soup = BeautifulSoup(response.content, 'html.parser')
         
         # Title
         h1 = soup.find('h1')
         title = h1.get_text(strip=True) if h1 else soup.title.get_text(strip=True) if soup.title else "No Title"
-        article = soup.find('article') or soup.find('div', class_='prose')
         
-        if not article:
-             print(f"No content found for {url}")
-             return []
-
         # Image
-        image_url = None
+        image_url = ""
         img_tag = soup.find('img', src=lambda x: x and 'charonhub.deeplearning.ai/content/images' in x)
         if img_tag:
             image_url = img_tag['src']
-
-        # Publish Date - try multiple common meta tag formats
-        publish_date = None
+            
+        # Date Standardization
+        raw_date = None
         date_meta = soup.find('meta', property='article:published_time')
         if date_meta:
-            publish_date = date_meta.get('content')
+            raw_date = date_meta.get('content')
         else:
-            # Fallback: try other common meta tags
-            for selector in [
-                {'name': 'date'},
-                {'name': 'publish-date'},
-                {'name': 'DC.date'},
-                {'property': 'og:published_time'},
-            ]:
-                date_meta = soup.find('meta', selector)
-                if date_meta:
-                    publish_date = date_meta.get('content')
-                    break
-            # Fallback: try time element
-            if not publish_date:
-                time_elem = soup.find('time', {'datetime': True})
-                if time_elem:
-                    publish_date = time_elem.get('datetime')
-
-        # Parse sections
-        content_chunks = []
-        current_section = "Introduction"
-        current_text = []
-
-        # Strategy: Find the container that holds the headers.
-        # 1. Look for headers inside the article
-        headers = article.find_all(['h1', 'h2', 'h3', 'h4'])
+            time_elem = soup.find('time', {'datetime': True})
+            if time_elem:
+                raw_date = time_elem.get('datetime')
         
-        if headers:
-            # Check if all headers are in the same container? No, just use find_all order.
-            pass
+        # ISO 8601 Formatting & Timestamp
+        publish_date = ""
+        timestamp = 0
+        if raw_date:
+            parsed_date = dateparser.parse(raw_date)
+            if parsed_date:
+                publish_date = parsed_date.strftime('%Y-%m-%d') # ISO 8601
+                timestamp = int(parsed_date.timestamp())
+        
+        # Content Type & Issue
+        content_type, issue_number = classify_content_type(url)
 
-        # Strategy: Flatten the document structure by finding all relevant block tags in order.
-        # This handles arbitrary nesting/containers (divs, sections, etc).
-        # We explicitly exclude containers like div/article/section to avoid duplication 
-        # (getting container text + child text).
-        # We use 'li' for lists and 'p' for text.
+        # 3. Parse Content with Unstructured
+        # Use partitioning to get clean text elements, handling layout better than raw soup
+        elements = partition_html(text=response.text)
         
-        elements = article.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'li', 'blockquote', 'figure'])
+        # Reconstruct text from elements
+        # Filter for meaningful text (NarrativeText, Title, ListItem)
+        # Unstructured elements have .text attribute
+        full_text = "\n\n".join([str(el) for el in elements if hasattr(el, 'text') and len(str(el)) > 20])
         
-        for element in elements:
-            # Skip if no text and not a figure (sometimes figures have no text but are important landmarks? 
-            # Actually figures are usually images, handled separately or ignored for text)
+        if not full_text.strip():
+             print(f"No meaningful text found for {url}")
+             return []
+
+        # 4. Extract Topic (using the first chunk of text)
+        topic = extract_topic(full_text)
+        
+        metadata = {
+            "source": url,
+            "title": title,
+            "image_url": image_url,
+            "publish_date": publish_date,
+            "timestamp": timestamp, # Numeric field for filtering
+            "content_type": content_type,
+            "topic": topic
+        }
+        if issue_number:
+            metadata["issue_number"] = issue_number
             
-            if element.name in ['h1', 'h2', 'h3', 'h4']:
-                # Save previous section if it has text
-                if current_text:
-                    full_text = " ".join(current_text).strip()
-                    if full_text:
-                        metadata = {
-                            "source": url,
-                            "title": title,
-                            "image_url": image_url or "",
-                            "section_header": current_section,
-                            "publish_date": publish_date or "",
-                            "content_type": content_type,
-                        }
-                        if issue_number:
-                            metadata["issue_number"] = issue_number
-                        content_chunks.append(Document(
-                            page_content=full_text,
-                            metadata=metadata
-                        ))
-                # Start new section
-                current_section = element.get_text(separator=' ', strip=True)
-                current_text = []
-            elif element.name in ['p', 'li', 'blockquote']:
-                # For blockquote, we might duplicate if it contains p. 
-                # Check if it has p children?
-                if element.name == 'blockquote' and element.find('p'):
-                    continue # Let the p child handle it
-                
-                text = element.get_text(separator=' ', strip=True)
-                if text:
-                    current_text.append(text)
+        doc = Document(page_content=full_text, metadata=metadata)
         
-        # Add the last section
-        if current_text:
-            full_text = " ".join(current_text).strip()
-            if full_text:
-                metadata = {
-                    "source": url,
-                    "title": title,
-                    "image_url": image_url or "",
-                    "section_header": current_section,
-                    "publish_date": publish_date or "",
-                    "content_type": content_type,
-                }
-                if issue_number:
-                    metadata["issue_number"] = issue_number
-                content_chunks.append(Document(
-                    page_content=full_text,
-                    metadata=metadata
-                ))
+        return [doc]
 
-        return content_chunks
     except Exception as e:
         print(f"Error scraping article {url}: {e}")
         return None

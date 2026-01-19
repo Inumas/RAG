@@ -6,10 +6,10 @@ import hashlib
 # Get the global logger
 logger = get_logger()
 
-def query_rag(question, api_key, retriever):
+def query_rag(question, api_key, retriever, filters=None):
     """
     Queries the RAG system using the LangGraph Control Flow.
-    Includes robust error handling for recursion limits (GraphRecursionError).
+    Includes error handling for recursion limits (GraphRecursionError).
     All actions are logged to a session file for traceability.
     """
     if not api_key:
@@ -30,7 +30,8 @@ def query_rag(question, api_key, retriever):
         "safety_status": "unknown",
         "retry_count": 0,  # Initialize retry counter
         "generation_count": 0,  # Initialize generation call counter
-        "temporal_retrieval": False  # Set by retrieve() if temporal query detected
+        "temporal_retrieval": False,  # Set by retrieve() if temporal query detected
+        "filters": filters  # Metadata filters
     }
     
     try:

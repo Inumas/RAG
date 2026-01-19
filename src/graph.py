@@ -38,6 +38,7 @@ class GraphState(TypedDict):
     retry_count: int  # Track number of query transform retries
     generation_count: int  # Track number of generate calls (hard limit)
     temporal_retrieval: bool  # Flag for temporal/recency queries - skip grading
+    filters: dict  # Metadata filters (topic, date range)
 
 # --- Security Nodes ---
 
@@ -82,13 +83,16 @@ def retrieve(state):
     print("---RETRIEVE---", flush=True)
     question = state["question"]
     retriever = state["retriever"]
+    filters = state.get("filters")
     
     # Check if this is a temporal query (for skipping grading)
-    is_temporal = retriever._is_temporal_query(question)
+    # Only treat as auto-temporal if NO filters are present. 
+    # If filters are present, we depend on them.
+    is_temporal = retriever._is_temporal_query(question) and not filters
     if is_temporal:
         print("---TEMPORAL QUERY DETECTED - WILL SKIP GRADING---", flush=True)
     
-    documents = retriever.retrieve(question)
+    documents = retriever.retrieve(question, filters=filters)
     
     duration_ms = (time.time() - start_time) * 1000
     
@@ -107,7 +111,8 @@ def retrieve(state):
         "document_count": len(documents),
         "documents": doc_summaries,
         "duration_ms": duration_ms,
-        "temporal_retrieval": is_temporal
+        "temporal_retrieval": is_temporal,
+        "filters": filters
     }, duration_ms=duration_ms)
     
     return {"documents": documents, "question": question, "temporal_retrieval": is_temporal}
@@ -139,8 +144,28 @@ def generate(state):
     
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
     
-    # Concatenate docs
-    context_text = "\n\n".join([d.page_content if hasattr(d, 'page_content') else str(d) for d in documents])
+    # Concatenate docs with metadata
+    context_parts = []
+    for d in documents:
+        content = d.page_content if hasattr(d, 'page_content') else str(d)
+        meta = d.metadata if hasattr(d, 'metadata') else {}
+        
+        # Add metadata headers if available
+        headers = []
+        if meta.get('title'):
+            headers.append(f"Title: {meta['title']}")
+        if meta.get('publish_date'):
+            headers.append(f"Date: {meta['publish_date']}")
+        if meta.get('issue_number'):
+            headers.append(f"Issue: {meta['issue_number']}")
+            
+        header_str = " | ".join(headers)
+        if header_str:
+            context_parts.append(f"[{header_str}]\n{content}")
+        else:
+            context_parts.append(content)
+            
+    context_text = "\n\n".join(context_parts)
     
     # Handle empty context gracefully
     if not context_text.strip() or "No web search results found" in context_text:
