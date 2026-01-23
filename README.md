@@ -263,3 +263,17 @@ python scripts/index_images.py
 python -c "from src.database import get_image_collection_stats; print(get_image_collection_stats())"
 ```
 
+## Utility Scripts
+
+The `scripts/` directory contains several utility scripts for maintenance, evaluation, and inspection.
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `db_stats.py` | Displays detailed statistics about the vector database (doc counts, sources, topics). | `python scripts/db_stats.py` |
+| `eval_harness.py` | Runs the retrieval evaluation pipeline using queries from `eval_queries.json`. | `python scripts/eval_harness.py` |
+| `eval_autolabel.py` | Uses GPT-4 to auto-label evaluation results for relevance (0.0 - 1.0). | `python scripts/eval_autolabel.py` |
+| `eval_metrics.py` | Computes precision, recall, and ranking metrics from labeled evaluation results. | `python scripts/eval_metrics.py` |
+| `index_images.py` | BACKFILL: Scans text docs for image URLs and generates CLIP embeddings for them. | `python scripts/index_images.py` |
+| `test_clip_retrieval.py` | Verifies multimodal retrieval logic and prints matched images for test queries. | `python scripts/test_clip_retrieval.py` |
+
+
