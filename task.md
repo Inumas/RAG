@@ -71,5 +71,6 @@
 
 - [x] **Phase 12: E2E Testing & Verification** <!-- id: 12 -->
     - [x] **Smoke Suite**: Implement `tests/test_e2e_smoke.py` (Ingestion + Security) <!-- id: 12.1 -->
-    - [x] **Execution**: Run smoke suite and verify pass <!-- id: 12.2 -->
+    - [x] **Comprehensive Suite**: Implement `tests/test_e2e_comprehensive.py` (8/8 test cases covered) <!-- id: 12.4 -->
+    - [x] **Execution**: Run all suites and verify pass (10/10 tests passed) <!-- id: 12.2 -->
     - [x] **Documentation**: Update `README.md` with testing instructions <!-- id: 12.3 -->

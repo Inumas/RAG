@@ -172,24 +172,46 @@ python src/log_viewer.py --verbose
 ```
 
 ## Testing
-To run the automated test suite (including E2E smoke tests):
 
-1. **Install Test Dependencies** (if not done):
-   ```powershell
-   pip install pytest
-   ```
+The project includes a comprehensive E2E test suite validating the full RAG pipeline.
 
-2. **Run All Tests**:
-   ```powershell
-   python -m pytest tests/
-   ```
+### Quick Start
+```powershell
+# Activate virtual environment
+.\.venv\Scripts\Activate.ps1
 
-3. **Run E2E Smoke Tests Only**:
-   ```powershell
-   python -m pytest tests/test_e2e_smoke.py -v
-   ```
+# Run all E2E tests
+pytest tests/test_e2e_comprehensive.py -v
+```
 
-   *Note: Smoke tests perform real ingestion and querying. Ensure your `OPENAI_API_KEY` is set in `.env`.*
+### Test Commands
+
+| Command | Description |
+|---------|-------------|
+| `pytest tests/test_e2e_comprehensive.py -v` | Run all 10 E2E tests |
+| `pytest tests/test_e2e_comprehensive.py -v -m smoke` | Smoke tests only (fast) |
+| `pytest tests/test_e2e_comprehensive.py -v -m "not slow"` | Skip slow CLIP tests |
+| `pytest tests/test_e2e_comprehensive.py --junitxml=test_results.xml` | Generate JUnit XML for CI |
+
+### Test Coverage
+
+| Test ID | Name | Description |
+|---------|------|-------------|
+| E2E-001 | Ingestion Smoke | Validates article scraping |
+| E2E-002 | VectorStore Populated | Checks ChromaDB indexing |
+| E2E-003 | Hybrid Retrieval | Tests vector + BM25 search |
+| E2E-004 | Security Guardrail | Unsafe query blocking |
+| E2E-005 | CLIP Collection Stats | Verifies image collection |
+| E2E-006 | CLIP Text Embedding | 512-dim CLIP embedding |
+| E2E-007 | Reranker Integration | CrossEncoder reranking |
+| E2E-008 | Full RAG Query | End-to-end pipeline |
+
+### Test Artifacts
+- `tests/TEST_PLAN.md` — Test plan and strategy
+- `tests/TEST_STATUS_REPORT.md` — Latest execution results
+- `tests/test_e2e_comprehensive.py` — Full test suite
+
+*Note: Tests require `OPENAI_API_KEY` set in `.env`.*
 
 ## Evaluation
 
