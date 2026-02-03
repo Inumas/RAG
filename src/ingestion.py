@@ -8,9 +8,50 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from unstructured.partition.html import partition_html
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
+from typing import List
 
 load_dotenv()
+
+
+def chunk_text(full_text: str, metadata: dict, chunk_size: int = 800, chunk_overlap: int = 100) -> List[Document]:
+    """
+    Split article text into semantic chunks, preserving metadata.
+    
+    Args:
+        full_text: The full article text
+        metadata: Metadata to attach to each chunk
+        chunk_size: Target size of each chunk in characters
+        chunk_overlap: Overlap between chunks to preserve context
+        
+    Returns:
+        List of Document objects, one per chunk
+    """
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", ", ", " "],
+        length_function=len
+    )
+    
+    chunks = splitter.split_text(full_text)
+    
+    # If text is short enough, return as single doc
+    if len(chunks) <= 1:
+        return [Document(page_content=full_text, metadata=metadata)]
+    
+    return [
+        Document(
+            page_content=chunk,
+            metadata={
+                **metadata,
+                "chunk_index": i,
+                "total_chunks": len(chunks)
+            }
+        )
+        for i, chunk in enumerate(chunks)
+    ]
 
 BASE_URL = "https://www.deeplearning.ai/the-batch/"
 SITEMAP_URLS = [
@@ -230,8 +271,10 @@ def scrape_article(url):
         }
         if issue_number:
             metadata["issue_number"] = issue_number
-            
-        doc = Document(page_content=full_text, metadata=metadata)
+        
+        # Split into chunks for better retrieval granularity
+        docs = chunk_text(full_text, metadata)
+        print(f"  Created {len(docs)} chunks from article")
         
         # Auto-index image with CLIP if image_url exists
         if image_url:
@@ -240,7 +283,7 @@ def scrape_article(url):
             except Exception as e:
                 print(f"  Warning: CLIP indexing failed for image: {e}")
         
-        return [doc]
+        return docs
 
     except Exception as e:
         print(f"Error scraping article {url}: {e}")

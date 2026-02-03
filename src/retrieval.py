@@ -302,33 +302,55 @@ class HybridRetriever:
         logger.debug(f"Pure recency check: '{query}' -> remaining tokens: {remaining_tokens}")
         return len(remaining_tokens) == 0
 
-    def _get_docs_from_latest_issues(self, n_issues: int = 20) -> List[Document]:
+    def _get_recent_docs(self, n_days: int = 30, max_docs: int = 200) -> List[Document]:
         """
-        Get ALL documents from the N most recent issues.
-        Returns a wider pool for semantic reranking to find relevant content.
+        Get documents from the most recent N days, sorted by timestamp.
+        Includes ALL documents (issues AND standalone articles).
         
         Args:
-            n_issues: Number of recent issues to include (default 20)
+            n_days: Number of recent days to include
+            max_docs: Maximum documents to return (for performance)
             
         Returns:
-            List of all documents from the most recent N issues
+            List of recent documents sorted by timestamp (newest first)
         """
-        # Filter to docs with issue_number metadata
-        docs_with_issue = [d for d in self.bm25_docs if d.metadata.get("issue_number")]
+        import time
         
-        if not docs_with_issue:
-            logger.info("No documents with issue_number metadata found")
+        # Get all docs with timestamps
+        docs_with_timestamp = [(d, d.metadata.get("timestamp", 0)) for d in self.bm25_docs]
+        
+        # Sort by timestamp descending (newest first)
+        docs_with_timestamp.sort(key=lambda x: x[1], reverse=True)
+        
+        # Filter to last N days if timestamps are available
+        cutoff_time = int(time.time()) - (n_days * 24 * 60 * 60)
+        recent_docs = []
+        no_timestamp_docs = []
+        
+        for doc, ts in docs_with_timestamp:
+            if ts > 0:
+                if ts >= cutoff_time:
+                    recent_docs.append(doc)
+            else:
+                # Keep docs without timestamp for fallback
+                no_timestamp_docs.append(doc)
+        
+        # If we have recent docs, use them; otherwise use all docs sorted by issue_number as fallback
+        if recent_docs:
+            logger.info(f"Temporal retrieval: {len(recent_docs)} docs from last {n_days} days")
+            return recent_docs[:max_docs]
+        elif no_timestamp_docs:
+            # Fallback: sort by issue_number if no timestamps
+            logger.info("No timestamps found, falling back to issue_number sorting")
+            sorted_by_issue = sorted(
+                [d for d in self.bm25_docs if d.metadata.get("issue_number")],
+                key=lambda x: x.metadata.get("issue_number", 0),
+                reverse=True
+            )
+            return sorted_by_issue[:max_docs]
+        else:
+            logger.info("No temporal metadata found in any documents")
             return []
-        
-        # Find the top N unique issue numbers
-        issue_numbers = set(d.metadata.get("issue_number") for d in docs_with_issue)
-        top_issues = sorted(issue_numbers, reverse=True)[:n_issues]
-        
-        # Get ALL docs from those issues (not just one per issue)
-        result = [d for d in docs_with_issue if d.metadata.get("issue_number") in top_issues]
-        
-        logger.info(f"Temporal retrieval: {len(result)} docs from issues {min(top_issues)}-{max(top_issues)}")
-        return result
 
     def _init_cross_encoder(self):
         """Lazy load cross encoder to save startup time if not used."""
@@ -470,8 +492,8 @@ class HybridRetriever:
         if self._is_temporal_query(query) and not filters:
             logger.info(f"Temporal query detected: '{query}'")
             
-            # Get docs from latest issues
-            recent_docs = self._get_docs_from_latest_issues(n_issues=20)
+            # Get recent docs (uses timestamp, includes all articles)
+            recent_docs = self._get_recent_docs(n_days=30)
             
             if not recent_docs:
                 logger.info("No issue metadata found, falling back to hybrid search")
@@ -480,17 +502,12 @@ class HybridRetriever:
             
             # Check if it's a PURE recency query
             if self._is_pure_recency_query(query):
-                logger.info("Pure recency query - returning docs from highest issue number")
-                sorted_docs = sorted(recent_docs, 
-                                   key=lambda x: x.metadata.get("issue_number", 0),
-                                   reverse=True)
-                max_issue = sorted_docs[0].metadata.get("issue_number")
-                top_issue_docs = [d for d in sorted_docs 
-                                 if d.metadata.get("issue_number") == max_issue 
-                                 and len(d.page_content) > 100]
-                if not top_issue_docs:
-                    top_issue_docs = [d for d in sorted_docs if d.metadata.get("issue_number") == max_issue]
-                return top_issue_docs[:3]
+                logger.info("Pure recency query - returning most recent documents")
+                # Already sorted by timestamp, just filter for quality
+                quality_docs = [d for d in recent_docs if len(d.page_content) > 100]
+                if not quality_docs:
+                    quality_docs = recent_docs
+                return quality_docs[:3]
             
             # TOPIC + RECENCY
             MAX_RERANK_POOL = 50
@@ -516,3 +533,43 @@ class HybridRetriever:
                 candidates = self._boost_docs_with_images(candidates, image_results)
         
         return self.rerank(query, candidates, top_n=3)
+
+    def get_relevant_images(self, query: str, threshold: float = 0.25, max_images: int = 5) -> List[Dict]:
+        """
+        Get images that are semantically relevant to the query based on CLIP similarity.
+        
+        Args:
+            query: The user's query text
+            threshold: Minimum CLIP similarity score (0-1) to include an image
+            max_images: Maximum number of images to return
+            
+        Returns:
+            List of dicts with {image_url, score, title, source} for relevant images only
+        """
+        if not self.enable_multimodal or not self.clip_embedder:
+            return []
+        
+        # Run CLIP image search
+        image_results = self._clip_image_search(query, k=max_images * 2)
+        
+        if not image_results:
+            return []
+        
+        # Filter by threshold
+        relevant_images = [
+            {
+                "image_url": img["image_url"],
+                "score": img["score"],
+                "title": img.get("title", ""),
+                "source": img.get("source", "")
+            }
+            for img in image_results
+            if img["score"] >= threshold and img["image_url"]
+        ]
+        
+        # Sort by score descending and limit
+        relevant_images.sort(key=lambda x: x["score"], reverse=True)
+        
+        logger.info(f"CLIP filter: {len(image_results)} candidates -> {len(relevant_images[:max_images])} above threshold {threshold}")
+        
+        return relevant_images[:max_images]

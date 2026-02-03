@@ -1,7 +1,7 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Literal, List
 
 # --- Data Models ---
 
@@ -17,6 +17,13 @@ class GradeDocuments(BaseModel):
     binary_score: str = Field(
         ..., 
         description="Documents are relevant to the question, 'yes' or 'no'"
+    )
+
+class BatchGradeDocuments(BaseModel):
+    """Batch relevance grades for multiple documents in a single call."""
+    grades: List[Literal["yes", "no"]] = Field(
+        ..., 
+        description="List of 'yes' or 'no' grades, one per document in the order they were provided"
     )
 
 class GradeHallucinations(BaseModel):
@@ -70,6 +77,30 @@ def get_grading_agent(api_key):
         ]
     )
     return grade_prompt | structured_llm_grader
+
+def get_batch_grading_agent(api_key):
+    """
+    Returns a runnable chain that grades multiple documents in a single call.
+    More efficient than calling get_grading_agent N times.
+    """
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
+    structured_llm_grader = llm.with_structured_output(BatchGradeDocuments)
+    
+    system = """You are a grader assessing relevance of multiple retrieved documents to a user question.
+    
+For EACH document, determine if it contains keyword(s) or semantic meaning related to the user question.
+It does not need to be a stringent test. The goal is to filter out erroneous retrievals.
+
+Return a list of 'yes' or 'no' grades, one for each document, in the EXACT ORDER they were provided.
+The number of grades MUST match the number of documents."""
+    
+    batch_grade_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system),
+            ("human", "User question: {question}\n\nDocuments to grade:\n{documents}"),
+        ]
+    )
+    return batch_grade_prompt | structured_llm_grader
 
 def get_hallucination_grader(api_key):
     """Returns a runnable chain that checks if generation is grounded in docs."""

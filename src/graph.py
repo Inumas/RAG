@@ -3,7 +3,8 @@ from langchain_core.documents import Document
 from langgraph.graph import END, StateGraph
 from agents import (
     get_router_agent, 
-    get_grading_agent, 
+    get_grading_agent,
+    get_batch_grading_agent,
     get_rewriter_agent, 
     get_hallucination_grader, 
     get_answer_grader,
@@ -234,16 +235,35 @@ def grade_documents(state):
         logger.log_document_grades(grades)
         return {"documents": documents, "question": question, "web_search": False}
     
-    grader = get_grading_agent(api_key)
+    grader = get_batch_grading_agent(api_key)
     filtered_docs = []
     web_search_flag = False
     grades = []
     
     retry_count = state.get("retry_count", 0)
     
-    for i, d in enumerate(documents):
-        score = grader.invoke({"question": question, "document": d.page_content})
-        grade = score.binary_score
+    # Prepare documents string for batch grading
+    docs_text = "\n\n---\n\n".join([
+        f"Document {i+1}:\n{d.page_content[:500]}..."  # Truncate for token efficiency
+        for i, d in enumerate(documents)
+    ])
+    
+    # Single batch grading call instead of N calls
+    try:
+        result = grader.invoke({"question": question, "documents": docs_text})
+        grade_list = result.grades
+        
+        # Validate we got the right number of grades
+        if len(grade_list) != len(documents):
+            print(f"---WARNING: Got {len(grade_list)} grades for {len(documents)} docs, falling back---", flush=True)
+            # Fallback: treat all as relevant
+            grade_list = ["yes"] * len(documents)
+    except Exception as e:
+        print(f"---BATCH GRADING ERROR: {e}, treating all as relevant---", flush=True)
+        grade_list = ["yes"] * len(documents)
+    
+    # Process grades
+    for i, (d, grade) in enumerate(zip(documents, grade_list)):
         grade_info = {
             "doc_index": i,
             "relevant": grade == "yes",
@@ -253,11 +273,10 @@ def grade_documents(state):
         grades.append(grade_info)
         
         if grade == "yes":
-            print("---GRADE: DOCUMENT RELEVANT---", flush=True)
+            print(f"---GRADE: DOC {i+1} RELEVANT---", flush=True)
             filtered_docs.append(d)
         else:
-            print("---GRADE: DOCUMENT NOT RELEVANT---", flush=True)
-            continue
+            print(f"---GRADE: DOC {i+1} NOT RELEVANT---", flush=True)
             
     if not filtered_docs:
         # If max retries reached, use original docs anyway (better than nothing)

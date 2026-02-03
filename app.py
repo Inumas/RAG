@@ -123,6 +123,18 @@ with st.sidebar:
     start_date = st.date_input("Start Date", value=None)
     end_date = st.date_input("End Date", value=None)
     
+    # Image Settings
+    st.subheader("🖼️ Image Settings")
+    clip_threshold = st.slider(
+        "CLIP Relevance Threshold", 
+        min_value=0.0, 
+        max_value=0.5, 
+        value=0.20, 
+        step=0.05,
+        help="Higher = stricter filtering. Only images above this score will be shown."
+    )
+    st.session_state.clip_threshold = clip_threshold
+    
     # Construct filters dict
     st.session_state.retrieval_filters = {}
     if selected_topic != "All":
@@ -176,9 +188,20 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                     
                     st.markdown(answer)
                     
+                    # Get CLIP-filtered relevant images (only images semantically matching the query)
+                    clip_threshold = st.session_state.get("clip_threshold", 0.20)
+                    relevant_images = retriever.get_relevant_images(prompt, threshold=clip_threshold, max_images=3)
+                    
+                    if relevant_images:
+                        st.subheader("Related Images")
+                        cols = st.columns(len(relevant_images))
+                        for i, img in enumerate(relevant_images):
+                            with cols[i]:
+                                st.image(img["image_url"], use_container_width=True)
+                                st.caption(f"Score: {img['score']:.2f}")
+                    
                     # Prepare source metadata for display
                     source_data = []
-                    images_to_show = []
                     for doc in sources:
                         meta = doc.metadata
                         src_info = {
@@ -188,18 +211,6 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                             "content": doc.page_content
                         }
                         source_data.append(src_info)
-                        if meta.get("image_url"):
-                            images_to_show.append(meta.get("image_url"))
-                    
-                    # Deduplicate images
-                    images_to_show = list(set(images_to_show))
-                    
-                    if images_to_show:
-                        st.subheader("Related Images")
-                        cols = st.columns(len(images_to_show))
-                        for i, img in enumerate(images_to_show):
-                            with cols[i]:
-                                st.image(img, use_container_width=True)
                     
                     with st.expander("Verified Sources"):
                         for src in source_data:
@@ -210,7 +221,7 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                         "role": "assistant",
                         "content": answer,
                         "sources": source_data,
-                        "images": images_to_show
+                        "images": [img["image_url"] for img in relevant_images]
                     })
                     
                 except Exception as e:
