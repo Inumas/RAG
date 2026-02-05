@@ -60,11 +60,15 @@ def query_rag(question, api_key, retriever, filters=None):
         # End logging session
         logger.end_session(answer, success=True, source_type=source_type, source_count=len(documents))
         
+        # Get the final query (may be rewritten from original)
+        final_query = final_state.get("question", question)
+        
         return {
             "answer": answer,
             "source_documents": documents,
             "source_type": source_type,
-            "session_id": session_id  # Include session ID for reference
+            "session_id": session_id,  # Include session ID for reference
+            "final_query": final_query  # Rewritten query for CLIP
         }
         
     except GraphRecursionError:

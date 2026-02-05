@@ -188,9 +188,10 @@ if prompt := st.chat_input("Ask about the latest AI news..."):
                     
                     st.markdown(answer)
                     
-                    # Get CLIP-filtered relevant images (only images semantically matching the query)
+                    # Get CLIP-filtered relevant images using the REWRITTEN query (not the original prompt with typos)
+                    clip_query = result.get("final_query", prompt)  # Fall back to prompt if no rewrite
                     clip_threshold = st.session_state.get("clip_threshold", 0.20)
-                    relevant_images = retriever.get_relevant_images(prompt, threshold=clip_threshold, max_images=3)
+                    relevant_images = retriever.get_relevant_images(clip_query, threshold=clip_threshold, max_images=3)
                     
                     if relevant_images:
                         st.subheader("Related Images")

@@ -117,6 +117,81 @@ class HybridRetriever:
             logger.warning(f"Multimodal init failed: {e}")
             self.enable_multimodal = False
 
+    def _correct_query_for_clip(self, query: str) -> str:
+        """
+        Correct common typos in query before CLIP embedding.
+        CLIP is sensitive to exact text - unlike semantic search which can fuzzy match.
+        
+        This corrects:
+        - Common AI figure name typos (andew ng -> Andrew Ng)
+        - Other known entity corrections
+        """
+        import difflib
+        
+        # Known entities that are commonly misspelled - extend as needed
+        known_entities = [
+            "Andrew Ng", "Geoffrey Hinton", "Yann LeCun", "Yoshua Bengio", 
+            "Sam Altman", "Demis Hassabis", "Fei-Fei Li", "Ilya Sutskever",
+            "Dario Amodei", "Andrej Karpathy", "OpenAI", "DeepMind", "Anthropic",
+            "Google", "Microsoft", "Meta", "NVIDIA", "Tesla"
+        ]
+        
+        # Tokenize query
+        words = query.split()
+        corrected_words = []
+        
+        i = 0
+        while i < len(words):
+            word = words[i]
+            word_clean = word.lower().strip(".,!?\"'")
+            
+            # Try to match 2-word names first (e.g., "andew ng" -> "Andrew Ng")
+            if i + 1 < len(words):
+                two_word = f"{words[i]} {words[i+1]}"
+                two_word_clean = two_word.lower().strip(".,!?\"'")
+                
+                # Check for fuzzy match against known 2-word entities
+                for entity in known_entities:
+                    if " " in entity:
+                        entity_lower = entity.lower()
+                        # Calculate similarity
+                        ratio = difflib.SequenceMatcher(None, two_word_clean, entity_lower).ratio()
+                        if ratio >= 0.7:  # 70% similarity threshold
+                            logger.info(f"CLIP query correction: '{two_word}' -> '{entity}'")
+                            corrected_words.append(entity)
+                            i += 2
+                            break
+                else:
+                    # No 2-word match, try single word
+                    matched = False
+                    for entity in known_entities:
+                        if " " not in entity:
+                            ratio = difflib.SequenceMatcher(None, word_clean, entity.lower()).ratio()
+                            if ratio >= 0.75:
+                                logger.info(f"CLIP query correction: '{word}' -> '{entity}'")
+                                corrected_words.append(entity)
+                                matched = True
+                                break
+                    if not matched:
+                        corrected_words.append(word)
+                    i += 1
+            else:
+                # Single word at end
+                matched = False
+                for entity in known_entities:
+                    if " " not in entity:
+                        ratio = difflib.SequenceMatcher(None, word_clean, entity.lower()).ratio()
+                        if ratio >= 0.75:
+                            logger.info(f"CLIP query correction: '{word}' -> '{entity}'")
+                            corrected_words.append(entity)
+                            matched = True
+                            break
+                if not matched:
+                    corrected_words.append(word)
+                i += 1
+        
+        return " ".join(corrected_words)
+
     def _clip_image_search(self, query: str, k: int = 10) -> List[Dict]:
         """
         Search for relevant images using CLIP text→image retrieval.
@@ -593,8 +668,11 @@ class HybridRetriever:
         if not self.enable_multimodal or not self.clip_embedder:
             return []
         
-        # Run CLIP image search
-        image_results = self._clip_image_search(query, k=max_images * 2)
+        # Correct query typos before CLIP embedding (CLIP is literal, not fuzzy)
+        corrected_query = self._correct_query_for_clip(query)
+        
+        # Run CLIP image search with corrected query
+        image_results = self._clip_image_search(corrected_query, k=max_images * 2)
         
         if not image_results:
             return []
