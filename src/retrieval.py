@@ -36,6 +36,7 @@ class HybridRetriever:
     - BM25 keyword search
     - CLIP image search (text→image)
     - CrossEncoder reranking
+    - Issue-aware retrieval (metadata filtering)
     """
     
     # Score fusion weight for image results
@@ -462,6 +463,39 @@ class HybridRetriever:
             
         return True
 
+    def _extract_issue_number(self, query: str) -> int | None:
+        """
+        Detect explicit issue number references in query.
+        Patterns: 'issue-334', 'issue 334', 'issue #334', '#334'
+        """
+        import re
+        patterns = [
+            r'issue[- ]?#?(\d+)',  # issue-334, issue 334, issue#334
+            r'#(\d+)',              # #334 (standalone)
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, query.lower())
+            if match:
+                return int(match.group(1))
+        return None
+
+    def _issue_aware_retrieve(self, issue_number: int, query: str) -> List[Document]:
+        """
+        Retrieve documents from a specific issue, then rerank by query relevance.
+        """
+        # Filter BM25 docs by issue_number
+        issue_docs = [d for d in self.bm25_docs 
+                      if d.metadata.get("issue_number") == issue_number]
+        
+        if not issue_docs:
+            logger.info(f"No documents found for issue {issue_number}")
+            return []
+        
+        logger.info(f"Found {len(issue_docs)} docs for issue {issue_number}")
+        
+        # Rerank by query relevance (in case query has topic focus)
+        return self.rerank(query, issue_docs, top_n=5)
+
     def rerank(self, query: str, docs: List[Document], top_n: int = 3) -> List[Document]:
         """Reranks documents using Cross-Encoder."""
         if not docs:
@@ -481,10 +515,20 @@ class HybridRetriever:
 
     def retrieve(self, query: str, mode: str = "hybrid", filters: Dict[str, Any] = None) -> List[Document]:
         """
-        Main retrieval entry point with temporal awareness and filtering.
+        Main retrieval entry point with temporal awareness, issue-aware retrieval, and filtering.
         """
         
-        # Check for temporal queries first (only if NO explicit filters provided)
+        # Check for explicit issue number reference FIRST
+        issue_number = self._extract_issue_number(query)
+        if issue_number:
+            logger.info(f"Issue reference detected: Issue {issue_number}")
+            issue_docs = self._issue_aware_retrieve(issue_number, query)
+            if issue_docs:
+                return issue_docs
+            # Fall through to normal retrieval if issue not found
+            logger.info(f"Issue {issue_number} not in database, falling back to search")
+        
+        # Check for temporal queries (only if NO explicit filters provided)
         # If user explicitly filters, we should respect that over auto-temporal logic?
         # Let's say explicit filters TAKE PRECEDENCE on constraints, but implicit recency queries 
         # still prioritize recent stuff WITHIN those constraints.
